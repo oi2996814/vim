@@ -1266,6 +1266,7 @@ did_set_clipboard(optset_T *args UNUSED)
 
     for (p = p_cb; *p != NUL; )
     {
+	// Note: Keep this in sync with p_cb_values.
 	if (STRNCMP(p, "unnamed", 7) == 0 && (p[7] == ',' || p[7] == NUL))
 	{
 	    new_unnamed |= CLIP_UNNAMED;
@@ -1333,7 +1334,8 @@ did_set_clipboard(optset_T *args UNUSED)
 #ifdef FEAT_GUI_GTK
 	if (gui.in_use)
 	{
-	    gui_gtk_set_selection_targets();
+	    gui_gtk_set_selection_targets((GdkAtom)GDK_SELECTION_PRIMARY);
+	    gui_gtk_set_selection_targets((GdkAtom)clip_plus.gtk_sel_atom);
 	    gui_gtk_set_dnd_targets();
 	}
 #endif
@@ -2127,7 +2129,7 @@ clip_convert_selection(char_u **str, long_u *len, Clipboard_T *cbd)
 	return -1;
 
     for (i = 0; i < y_ptr->y_size; i++)
-	*len += (long_u)STRLEN(y_ptr->y_array[i]) + eolsize;
+	*len += (long_u)y_ptr->y_array[i].length + eolsize;
 
     // Don't want newline character at end of last line if we're in MCHAR mode.
     if (y_ptr->y_type == MCHAR && *len >= eolsize)
@@ -2139,9 +2141,9 @@ clip_convert_selection(char_u **str, long_u *len, Clipboard_T *cbd)
     lnum = 0;
     for (i = 0, j = 0; i < (int)*len; i++, j++)
     {
-	if (y_ptr->y_array[lnum][j] == '\n')
+	if (y_ptr->y_array[lnum].string[j] == '\n')
 	    p[i] = NUL;
-	else if (y_ptr->y_array[lnum][j] == NUL)
+	else if (y_ptr->y_array[lnum].string[j] == NUL)
 	{
 # ifdef USE_CRNL
 	    p[i++] = '\r';
@@ -2151,7 +2153,7 @@ clip_convert_selection(char_u **str, long_u *len, Clipboard_T *cbd)
 	    j = -1;
 	}
 	else
-	    p[i] = y_ptr->y_array[lnum][j];
+	    p[i] = y_ptr->y_array[lnum].string[j];
     }
     return y_ptr->y_type;
 }
@@ -2218,10 +2220,12 @@ adjust_clip_reg(int *rp)
 	    *rp = ((clip_unnamed_saved & CLIP_UNNAMED_PLUS)
 					   && clip_plus.available) ? '+' : '*';
     }
-    if (!clip_star.available && *rp == '*')
+    if ((!clip_star.available && *rp == '*') ||
+           (!clip_plus.available && *rp == '+'))
+    {
+	msg_warn_missing_clipboard();
 	*rp = 0;
-    if (!clip_plus.available && *rp == '+')
-	*rp = 0;
+    }
 }
 
 #endif // FEAT_CLIPBOARD

@@ -189,10 +189,15 @@ compile_lock_unlock(
     int		cc = *name_end;
     char_u	*p = lvp->ll_name;
     int		ret = OK;
-    size_t	len;
     char_u	*buf;
     isntype_T	isn = ISN_EXEC;
     char	*cmd = eap->cmdidx == CMD_lockvar ? "lockvar" : "unlockvar";
+    int		is_arg = FALSE;
+
+#ifdef LOG_LOCKVAR
+    ch_log(NULL, "LKVAR: compile_lock_unlock(): cookie %p, name %s",
+								coookie, p);
+#endif
 
     if (cctx->ctx_skip == SKIP_YES)
 	return OK;
@@ -208,19 +213,86 @@ compile_lock_unlock(
     {
 	char_u *end = find_name_end(p, NULL, NULL, FNE_CHECK_START);
 
-	if (lookup_local(p, end - p, NULL, cctx) == OK)
-	{
-	    char_u *s = p;
+	// The most important point is that something like
+	// name[idx].member... needs to be resolved at runtime, get_lval(),
+	// starting from the root "name".
 
-	    if (*end != '.' && *end != '[')
+	// These checks are reminiscent of the variable_exists function.
+	// But most of the matches require special handling.
+
+	// If bare name is is locally accessible, except for local var,
+	// then put it on the stack to use with ISN_LOCKUNLOCK.
+	// This could be v.memb, v[idx_key]; bare class variable,
+	// function arg. The item on the stack, will be passed
+	// to ex_lockvar() indirectly and be used as the root for get_lval.
+	// A bare script variable name needs no special handling.
+
+	char_u	*name = NULL;
+	int	len = end - p;
+
+	if (lookup_local(p, len, NULL, cctx) == OK)
+	{
+	    // Handle "this", "this.val", "anyvar[idx]"
+	    if (*end != '.' && *end != '['
+				&& (len != 4 || STRNCMP("this", p, len) != 0))
 	    {
 		emsg(_(e_cannot_lock_unlock_local_variable));
 		return FAIL;
 	    }
-
-	    // For "d.member" put the local variable on the stack, it will be
-	    // passed to ex_lockvar() indirectly.
-	    if (compile_load(&s, end, cctx, FALSE, FALSE) == FAIL)
+	    // Push the local on the stack, could be "this".
+	    name = p;
+#ifdef LOG_LOCKVAR
+	    ch_log(NULL, "LKVAR:    ... lookup_local: name %s", name);
+#endif
+	}
+	if (name == NULL)
+	{
+	    class_T *cl;
+	    if (cctx_class_member_idx(cctx, p, len, &cl) >= 0)
+	    {
+		if (*end != '.' && *end != '[')
+		{
+		    // Push the class of the bare class variable name
+		    name = cl->class_name;
+		    len = (int)STRLEN(name);
+#ifdef LOG_LOCKVAR
+		    ch_log(NULL, "LKVAR:    ... cctx_class_member: name %s",
+			   name);
+#endif
+		}
+	    }
+	}
+	if (name == NULL)
+	{
+	    // Can lockvar any function arg.
+	    if (arg_exists(p, len, NULL, NULL, NULL, cctx) == OK)
+	    {
+		name = p;
+		is_arg = TRUE;
+#ifdef LOG_LOCKVAR
+		ch_log(NULL, "LKVAR:    ... arg_exists: name %s", name);
+#endif
+	    }
+	}
+	if (name == NULL)
+	{
+	    // No special handling for a bare script variable; but
+	    // if followed by '[' or '.', it's a root for get_lval().
+	    if (script_var_exists(p, len, cctx, NULL) == OK
+		&& (*end == '.' || *end == '['))
+	    {
+		name = p;
+#ifdef LOG_LOCKVAR
+		ch_log(NULL, "LKVAR:    ... script_var_exists: name %s", name);
+#endif
+	    }
+	}
+	if (name != NULL)
+	{
+#ifdef LOG_LOCKVAR
+	    ch_log(NULL, "LKVAR:    ... INS_LOCKUNLOCK %s", name);
+#endif
+	    if (compile_load(&name, name + len, cctx, FALSE, FALSE) == FAIL)
 		return FAIL;
 	    isn = ISN_LOCKUNLOCK;
 	}
@@ -228,7 +300,7 @@ compile_lock_unlock(
 
     // Checking is done at runtime.
     *name_end = NUL;
-    len = name_end - p + 20;
+    size_t len = name_end - p + 20;
     buf = alloc(len);
     if (buf == NULL)
 	ret = FAIL;
@@ -238,7 +310,13 @@ compile_lock_unlock(
 	    vim_snprintf((char *)buf, len, "%s! %s", cmd, p);
 	else
 	    vim_snprintf((char *)buf, len, "%s %d %s", cmd, deep, p);
-	ret = generate_EXEC_copy(cctx, isn, buf);
+#ifdef LOG_LOCKVAR
+	ch_log(NULL, "LKVAR:    ... buf %s", buf);
+#endif
+	if (isn == ISN_LOCKUNLOCK)
+	    ret = generate_LOCKUNLOCK(cctx, buf, is_arg);
+	else
+	    ret = generate_EXEC_copy(cctx, isn, buf);
 
 	vim_free(buf);
 	*name_end = cc;
@@ -524,7 +602,9 @@ compile_elseif(char_u *arg, cctx_T *cctx)
 	return NULL;
     }
     unwind_locals(cctx, scope->se_local_count, TRUE);
-    if (!cctx->ctx_had_return)
+    if (!cctx->ctx_had_return && !cctx->ctx_had_throw)
+	// the previous if block didn't end in a "return" or a "throw"
+	// statement.
 	scope->se_u.se_if.is_had_return = FALSE;
 
     if (cctx->ctx_skip == SKIP_NOT)
@@ -671,7 +751,9 @@ compile_else(char_u *arg, cctx_T *cctx)
 	return NULL;
     }
     unwind_locals(cctx, scope->se_local_count, TRUE);
-    if (!cctx->ctx_had_return)
+    if (!cctx->ctx_had_return && !cctx->ctx_had_throw)
+	// the previous if block didn't end in a "return" or a "throw"
+	// statement.
 	scope->se_u.se_if.is_had_return = FALSE;
     scope->se_u.se_if.is_seen_else = TRUE;
 
@@ -743,7 +825,9 @@ compile_endif(char_u *arg, cctx_T *cctx)
     }
     ifscope = &scope->se_u.se_if;
     unwind_locals(cctx, scope->se_local_count, TRUE);
-    if (!cctx->ctx_had_return)
+    if (!cctx->ctx_had_return && !cctx->ctx_had_throw)
+	// the previous if block didn't end in a "return" or a "throw"
+	// statement.
 	ifscope->is_had_return = FALSE;
 
     if (scope->se_u.se_if.is_if_label >= 0)
@@ -1010,6 +1094,8 @@ compile_for(char_u *arg_start, cctx_T *cctx)
 		}
 		p = skipwhite(p + 1);
 		lhs_type = parse_type(&p, cctx->ctx_type_list, TRUE);
+		if (lhs_type == NULL)
+		    goto failed;
 	    }
 
 	    if (get_var_dest(name, &dest, CMD_for, &opt_flags,
@@ -1559,7 +1645,7 @@ compile_try(char_u *arg, cctx_T *cctx)
  * Compile "catch {expr}".
  */
     char_u *
-compile_catch(char_u *arg, cctx_T *cctx UNUSED)
+compile_catch(char_u *arg, cctx_T *cctx)
 {
     scope_T	*scope = cctx->ctx_scope;
     garray_T	*instr = &cctx->ctx_instr;
@@ -1843,7 +1929,7 @@ compile_endtry(char_u *arg, cctx_T *cctx)
  * compile "throw {expr}"
  */
     char_u *
-compile_throw(char_u *arg, cctx_T *cctx UNUSED)
+compile_throw(char_u *arg, cctx_T *cctx)
 {
     char_u *p = skipwhite(arg);
 
@@ -1851,7 +1937,7 @@ compile_throw(char_u *arg, cctx_T *cctx UNUSED)
 	return NULL;
     if (cctx->ctx_skip == SKIP_YES)
 	return p;
-    if (may_generate_2STRING(-1, FALSE, cctx) == FAIL)
+    if (may_generate_2STRING(-1, TOSTRING_NONE, cctx) == FAIL)
 	return NULL;
     if (generate_instr_drop(cctx, ISN_THROW, 1) == NULL)
 	return NULL;
@@ -1920,9 +2006,8 @@ compile_defer(char_u *arg_start, cctx_T *cctx)
     char_u	*arg = arg_start;
     int		argcount = 0;
     int		defer_var_idx;
-    type_T	*type;
+    type_T	*type = NULL;
     int		func_idx;
-    int		obj_method = 0;
 
     // Get a funcref for the function name.
     // TODO: better way to find the "(".
@@ -1938,23 +2023,19 @@ compile_defer(char_u *arg_start, cctx_T *cctx)
 	// TODO: better type
 	generate_PUSHFUNC(cctx, (char_u *)internal_func_name(func_idx),
 							   &t_func_any, FALSE);
-    else
-    {
-	int typecount = cctx->ctx_type_stack.ga_len;
-	if (compile_expr0(&arg, cctx) == FAIL)
-	    return NULL;
-	if (cctx->ctx_type_stack.ga_len >= typecount + 2)
-	    // must have seen "obj.Func", pushed an object and a function
-	    obj_method = 1;
-    }
+    else if (compile_expr0(&arg, cctx) == FAIL)
+	return NULL;
     *paren = '(';
 
     // check for function type
-    type = get_type_on_stack(cctx, 0);
-    if (type->tt_type != VAR_FUNC)
+    if (cctx->ctx_skip != SKIP_YES)
     {
-	emsg(_(e_function_name_required));
-	return NULL;
+	type = get_type_on_stack(cctx, 0);
+	if (type->tt_type != VAR_FUNC)
+	{
+	    emsg(_(e_function_name_required));
+	    return NULL;
+	}
     }
 
     // compile the arguments
@@ -1962,24 +2043,27 @@ compile_defer(char_u *arg_start, cctx_T *cctx)
     if (compile_arguments(&arg, cctx, &argcount, CA_NOT_SPECIAL) == FAIL)
 	return NULL;
 
-    if (func_idx >= 0)
+    if (cctx->ctx_skip != SKIP_YES)
     {
-	type2_T	*argtypes = NULL;
-	type2_T	shuffled_argtypes[MAX_FUNC_ARGS];
+	if (func_idx >= 0)
+	{
+	    type2_T	*argtypes = NULL;
+	    type2_T	shuffled_argtypes[MAX_FUNC_ARGS];
 
-	if (check_internal_func_args(cctx, func_idx, argcount, FALSE,
-					 &argtypes, shuffled_argtypes) == FAIL)
+	    if (check_internal_func_args(cctx, func_idx, argcount, FALSE,
+			&argtypes, shuffled_argtypes) == FAIL)
+		return NULL;
+	}
+	else if (check_func_args_from_type(cctx, type, argcount, TRUE,
+		    arg_start) == FAIL)
+	    return NULL;
+
+	defer_var_idx = get_defer_var_idx(cctx);
+	if (defer_var_idx == 0)
+	    return NULL;
+	if (generate_DEFER(cctx, defer_var_idx - 1, argcount) == FAIL)
 	    return NULL;
     }
-    else if (check_func_args_from_type(cctx, type, argcount, TRUE,
-							    arg_start) == FAIL)
-	return NULL;
-
-    defer_var_idx = get_defer_var_idx(cctx);
-    if (defer_var_idx == 0)
-	return NULL;
-    if (generate_DEFER(cctx, defer_var_idx - 1, obj_method, argcount) == FAIL)
-	return NULL;
 
     return skipwhite(arg);
 }
@@ -2281,7 +2365,7 @@ compile_exec(char_u *line_arg, exarg_T *eap, cctx_T *cctx)
 	    p += 2;
 	    if (compile_expr0(&p, cctx) == FAIL)
 		return NULL;
-	    may_generate_2STRING(-1, TRUE, cctx);
+	    may_generate_2STRING(-1, TOSTRING_TOLERANT, cctx);
 	    ++count;
 	    p = skipwhite(p);
 	    if (*p != '`')
@@ -2591,6 +2675,8 @@ compile_return(char_u *arg, int check_return_type, int legacy, cctx_T *cctx)
 	    // for an inline function without a specified return type.  Set the
 	    // return type here.
 	    stack_type = get_type_on_stack(cctx, 0);
+	    if (check_type_is_value(stack_type) == FAIL)
+		return NULL;
 	    if ((check_return_type && (cctx->ctx_ufunc->uf_ret_type == NULL
 				|| cctx->ctx_ufunc->uf_ret_type == &t_unknown))
 		    || (!check_return_type
@@ -2617,7 +2703,7 @@ compile_return(char_u *arg, int check_return_type, int legacy, cctx_T *cctx)
 	    return NULL;
 	}
 
-	if (cctx->ctx_ufunc->uf_flags & FC_NEW)
+	if (IS_CONSTRUCTOR_METHOD(cctx->ctx_ufunc))
 	{
 	    // For a class new() constructor, return an object of the class.
 	    generate_instr(cctx, ISN_RETURN_OBJECT);

@@ -1098,7 +1098,7 @@ is_safe_now(void)
 }
 
 /*
- * Trigger SafeState if currently in s safe state, that is "safe" is TRUE and
+ * Trigger SafeState if currently in a safe state, that is "safe" is TRUE and
  * there is no typeahead.
  */
     void
@@ -1548,7 +1548,7 @@ main_loop(
 		    && !skip_term_loop)
 	    {
 		// If terminal_loop() returns OK we got a key that is handled
-		// in Normal model.  With FAIL we first need to position the
+		// in Normal mode.  With FAIL we first need to position the
 		// cursor and the screen needs to be redrawn.
 		if (terminal_loop(TRUE) == OK)
 		    normal_cmd(&oa, TRUE);
@@ -1646,7 +1646,7 @@ getout(int exitval)
 	    next_tp = tp->tp_next;
 	    FOR_ALL_WINDOWS_IN_TAB(tp, wp)
 	    {
-		if (wp->w_buffer == NULL)
+		if (wp->w_buffer == NULL || !buf_valid(wp->w_buffer))
 		    // Autocmd must have close the buffer already, skip.
 		    continue;
 		buf = wp->w_buffer;
@@ -1694,7 +1694,11 @@ getout(int exitval)
     }
 
 #ifdef FEAT_VIMINFO
-    if (*p_viminfo != NUL)
+    if (
+# ifdef EXITFREE
+	    entered_free_all_mem == FALSE &&
+# endif
+	    *p_viminfo != NUL)
 	// Write out the registers, history, marks etc, to the viminfo file
 	write_viminfo(NULL, FALSE);
 #endif
@@ -3274,6 +3278,10 @@ source_startup_scripts(mparm_T *parmp)
 						      DOSO_VIMRC, NULL) == FAIL
 #ifdef USR_VIMRC_FILE2
 		&& do_source((char_u *)USR_VIMRC_FILE2, TRUE,
+						      DOSO_VIMRC, NULL) == FAIL
+#endif
+#ifdef XDG_VIMRC_FILE
+		&& do_source((char_u *)XDG_VIMRC_FILE, TRUE,
 						      DOSO_VIMRC, NULL) == FAIL
 #endif
 #ifdef USR_VIMRC_FILE3

@@ -427,7 +427,7 @@ func Test_script_local_func()
   " Try to call a script local function in global scope
   let lines =<< trim [CODE]
     :call assert_fails('call s:Xfunc()', 'E81:')
-    :call assert_fails('let x = call("<SID>Xfunc", [])', 'E120:')
+    :call assert_fails('let x = call("<SID>Xfunc", [])', ['E81:', 'E117:'])
     :call writefile(v:errors, 'Xresult')
     :qall
 
@@ -870,5 +870,121 @@ func Test_defer_wrong_arguments()
   call v9.CheckScriptFailure(lines, 'E1013: Argument 1: type mismatch, expected string but got number')
 endfunc
 
+" Test for calling a deferred function after an exception
+func Test_defer_after_exception()
+  let g:callTrace = []
+  func Bar()
+    let g:callTrace += [1]
+    throw 'InnerException'
+  endfunc
+
+  func Defer()
+    let g:callTrace += [2]
+    let g:callTrace += [3]
+    try
+      call Bar()
+    catch /InnerException/
+      let g:callTrace += [4]
+    endtry
+    let g:callTrace += [5]
+    let g:callTrace += [6]
+  endfunc
+
+  func Foo()
+    defer Defer()
+    throw "TestException"
+  endfunc
+
+  try
+    call Foo()
+  catch /TestException/
+    let g:callTrace += [7]
+  endtry
+  call assert_equal([2, 3, 1, 4, 5, 6, 7], g:callTrace)
+
+  delfunc Defer
+  delfunc Foo
+  delfunc Bar
+  unlet g:callTrace
+endfunc
+
+" Test for multiple deferred function which throw exceptions.
+" Exceptions thrown by deferred functions should result in error messages but
+" not propagated into the calling functions.
+func Test_multidefer_with_exception()
+  let g:callTrace = []
+  func Except()
+    let g:callTrace += [1]
+    throw 'InnerException'
+    let g:callTrace += [2]
+  endfunc
+
+  func FirstDefer()
+    let g:callTrace += [3]
+    let g:callTrace += [4]
+  endfunc
+
+  func SecondDeferWithExcept()
+    let g:callTrace += [5]
+    call Except()
+    let g:callTrace += [6]
+  endfunc
+
+  func ThirdDefer()
+    let g:callTrace += [7]
+    let g:callTrace += [8]
+  endfunc
+
+  func Foo()
+    let g:callTrace += [9]
+    defer FirstDefer()
+    defer SecondDeferWithExcept()
+    defer ThirdDefer()
+    let g:callTrace += [10]
+  endfunc
+
+  let v:errmsg = ''
+  try
+    let g:callTrace += [11]
+    call Foo()
+    let g:callTrace += [12]
+  catch /TestException/
+    let g:callTrace += [13]
+  catch
+    let g:callTrace += [14]
+  finally
+    let g:callTrace += [15]
+  endtry
+  let g:callTrace += [16]
+
+  call assert_equal('E605: Exception not caught: InnerException', v:errmsg)
+  call assert_equal([11, 9, 10, 7, 8, 5, 1, 3, 4, 12, 15, 16], g:callTrace)
+
+  unlet g:callTrace
+  delfunc Except
+  delfunc FirstDefer
+  delfunc SecondDeferWithExcept
+  delfunc ThirdDefer
+  delfunc Foo
+endfunc
+
+func Test_func_curly_brace_invalid_name()
+  func Fail()
+    func Foo{'()'}bar()
+    endfunc
+  endfunc
+
+  call assert_fails('call Fail()', 'E475: Invalid argument: Foo()bar')
+
+  silent! call Fail()
+  call assert_equal([], getcompletion('Foo', 'function'))
+
+  set formatexpr=Fail()
+  normal! gqq
+  call assert_equal([], getcompletion('Foo', 'function'))
+
+  set formatexpr&
+  delfunc Fail
+endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

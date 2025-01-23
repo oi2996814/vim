@@ -172,9 +172,7 @@ get_fpos_of_mouse(pos_T *mpos)
     if (mouse_comp_pos(curwin, &row, &col, &mpos->lnum, NULL))
 	return IN_STATUS_LINE; // past bottom
 
-    mpos->col = vcol2col(wp, mpos->lnum, col);
-
-    mpos->coladd = 0;
+    mpos->col = vcol2col(wp, mpos->lnum, col, &mpos->coladd);
     return IN_BUFFER;
 }
 #endif
@@ -1131,7 +1129,7 @@ do_mousescroll(cmdarg_T *cap)
 	if (!(State & MODE_INSERT) && (mouse_vert_step < 0 || shift_or_ctrl))
 	{
 	    // whole page up or down
-	    onepage(cap->arg == MSCR_UP ? FORWARD : BACKWARD, 1L);
+	    pagescroll(cap->arg == MSCR_UP ? FORWARD : BACKWARD, 1L, FALSE);
 	}
 	else
 	{
@@ -1698,7 +1696,7 @@ retnomove:
 	}
 #if defined(FEAT_CLIPBOARD)
 	// Continue a modeless selection in another window.
-	if (cmdwin_type != 0 && row < curwin->w_winrow)
+	if (cmdwin_type != 0 && row < cmdwin_win->w_winrow)
 	    return IN_OTHER_WIN;
 #endif
 #ifdef FEAT_PROP_POPUP
@@ -1826,7 +1824,7 @@ retnomove:
 # ifdef FEAT_RIGHTLEFT
 			    wp->w_p_rl ? col < wp->w_width - wp->w_p_fdc :
 # endif
-			    col >= wp->w_p_fdc + (cmdwin_type == 0 && wp == curwin ? 0 : 1)
+			    col >= wp->w_p_fdc + (wp != cmdwin_win ? 0 : 1)
 			    )
 #endif
 			&& (flags & MOUSE_MAY_STOP_VIS))))
@@ -1834,7 +1832,7 @@ retnomove:
 	    end_visual_mode_keep_button();
 	    redraw_curbuf_later(UPD_INVERTED);	// delete the inversion
 	}
-	if (cmdwin_type != 0 && wp != curwin)
+	if (cmdwin_type != 0 && wp != cmdwin_win)
 	{
 	    // A click outside the command-line window: Use modeless
 	    // selection if possible.  Allow dragging the status lines.
@@ -1846,7 +1844,7 @@ retnomove:
 #else
 	    row = 0;
 	    col += wp->w_wincol;
-	    wp = curwin;
+	    wp = cmdwin_win;
 #endif
 	}
 #if defined(FEAT_PROP_POPUP) && defined(FEAT_TERMINAL)
@@ -1939,7 +1937,7 @@ retnomove:
 
 #if defined(FEAT_CLIPBOARD)
 	// Continue a modeless selection in another window.
-	if (cmdwin_type != 0 && row < curwin->w_winrow)
+	if (cmdwin_type != 0 && row < cmdwin_win->w_winrow)
 	    return IN_OTHER_WIN;
 #endif
 #ifdef FEAT_PROP_POPUP
@@ -2052,7 +2050,9 @@ retnomove:
 	}
     }
 
-    if (prev_row >= 0 && prev_row < Rows && prev_col >= 0 && prev_col <= Columns
+    if (prev_row >= W_WINROW(curwin)
+	&& prev_row < W_WINROW(curwin) + curwin->w_height
+	&& prev_col >= curwin->w_wincol && prev_col < W_ENDCOL(curwin)
 						       && ScreenLines != NULL)
     {
 	int off = LineOffset[prev_row] + prev_col;
@@ -2075,7 +2075,7 @@ retnomove:
 # ifdef FEAT_RIGHTLEFT
 	    curwin->w_p_rl ? col < curwin->w_width - curwin->w_p_fdc :
 # endif
-	    col >= curwin->w_p_fdc + (cmdwin_type == 0 ? 0 : 1)
+	    col >= curwin->w_p_fdc + (cmdwin_win != curwin ? 0 : 1)
        )
 	mouse_char = ' ';
 #endif
@@ -2098,30 +2098,7 @@ retnomove:
 	    redraw_cmdline = TRUE;	// show visual mode later
     }
 
-    if (col_from_screen == MAXCOL)
-    {
-	// When clicking after end of line, still need to set correct curswant
-	int off_l = LineOffset[prev_row];
-	if (ScreenCols[off_l] < MAXCOL)
-	{
-	    // Binary search to find last char in line
-	    int off_r = off_l + prev_col;
-	    int off_click = off_r;
-	    while (off_l < off_r)
-	    {
-		int off_m = (off_l + off_r + 1) / 2;
-		if (ScreenCols[off_m] < MAXCOL)
-		    off_l = off_m;
-		else
-		    off_r = off_m - 1;
-	    }
-	    col = ScreenCols[off_r] + (off_click - off_r);
-	}
-	else
-	    // Shouldn't normally happen
-	    col = MAXCOL;
-    }
-    else if (col_from_screen >= 0)
+    if (col_from_screen >= 0)
     {
 	// Use the virtual column from ScreenCols[], it is accurate also after
 	// concealed characters.
@@ -2162,7 +2139,7 @@ retnomove:
 do_mousescroll_horiz(long_u leftcol)
 {
     if (curwin->w_p_wrap)
-	return FALSE;  // no wrapping, no scrolling
+	return FALSE;  // no horizontal scrolling when wrapping
 
     if (curwin->w_leftcol == (colnr_T)leftcol)
 	return FALSE;  // already there
@@ -2219,10 +2196,6 @@ nv_mousescroll(cmdarg_T *cap)
     // Call the common mouse scroll function shared with other modes.
     do_mousescroll(cap);
 
-#ifdef FEAT_SYN_HL
-    if (curwin != old_curwin && curwin->w_p_cul)
-	redraw_for_cursorline(curwin);
-#endif
     curwin->w_redr_status = TRUE;
     curwin = old_curwin;
     curbuf = curwin->w_buffer;
@@ -3056,16 +3029,22 @@ mouse_comp_pos(
 
 	if (win->w_skipcol > 0 && lnum == win->w_topline)
 	{
-	    // Adjust for 'smoothscroll' clipping the top screen lines.
-	    // A similar formula is used in curs_columns().
 	    int width1 = win->w_width - win_col_off(win);
-	    int skip_lines = 0;
-	    if (win->w_skipcol > width1)
-		skip_lines = (win->w_skipcol - width1)
+
+	    if (width1 > 0)
+	    {
+		int skip_lines = 0;
+
+		// Adjust for 'smoothscroll' clipping the top screen lines.
+		// A similar formula is used in curs_columns().
+		if (win->w_skipcol > width1)
+		    skip_lines = (win->w_skipcol - width1)
 					    / (width1 + win_col_off2(win)) + 1;
-	    else if (win->w_skipcol > 0)
-		skip_lines = 1;
-	    count -= skip_lines;
+		else if (win->w_skipcol > 0)
+		    skip_lines = 1;
+
+		count -= skip_lines;
+	    }
 	}
 
 	if (count > row)
@@ -3196,10 +3175,10 @@ mouse_find_win(int *rowp, int *colp, mouse_find_T popup UNUSED)
 	|| defined(FEAT_EVAL) || defined(PROTO)
 /*
  * Convert a virtual (screen) column to a character column.
- * The first column is one.
+ * The first column is zero.
  */
     int
-vcol2col(win_T *wp, linenr_T lnum, int vcol)
+vcol2col(win_T *wp, linenr_T lnum, int vcol, colnr_T *coladdp)
 {
     char_u	    *line;
     chartabsize_T   cts;
@@ -3209,11 +3188,16 @@ vcol2col(win_T *wp, linenr_T lnum, int vcol)
     init_chartabsize_arg(&cts, wp, lnum, 0, line, line);
     while (cts.cts_vcol < vcol && *cts.cts_ptr != NUL)
     {
-	cts.cts_vcol += win_lbr_chartabsize(&cts, NULL);
+	int size = win_lbr_chartabsize(&cts, NULL);
+	if (cts.cts_vcol + size > vcol)
+	    break;
+	cts.cts_vcol += size;
 	MB_PTR_ADV(cts.cts_ptr);
     }
     clear_chartabsize_arg(&cts);
 
+    if (coladdp != NULL)
+	*coladdp = vcol - cts.cts_vcol;
     return (int)(cts.cts_ptr - line);
 }
 #endif
@@ -3234,6 +3218,7 @@ f_getmousepos(typval_T *argvars UNUSED, typval_T *rettv)
     varnumber_T wincol = 0;
     linenr_T	lnum = 0;
     varnumber_T column = 0;
+    colnr_T	coladd = 0;
 
     if (rettv_dict_alloc(rettv) == FAIL)
 	return;
@@ -3267,7 +3252,7 @@ f_getmousepos(typval_T *argvars UNUSED, typval_T *rettv)
 	    if (row >= 0 && row < wp->w_height && col >= 0 && col < wp->w_width)
 	    {
 		(void)mouse_comp_pos(wp, &row, &col, &lnum, NULL);
-		col = vcol2col(wp, lnum, col);
+		col = vcol2col(wp, lnum, col, &coladd);
 		column = col + 1;
 	    }
 	}
@@ -3277,5 +3262,6 @@ f_getmousepos(typval_T *argvars UNUSED, typval_T *rettv)
     dict_add_number(d, "wincol", wincol);
     dict_add_number(d, "line", (varnumber_T)lnum);
     dict_add_number(d, "column", column);
+    dict_add_number(d, "coladd", coladd);
 }
 #endif

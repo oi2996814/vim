@@ -853,6 +853,7 @@ static digr_T digraphdefault[] = {
 	{'1', '\'', 0x2032},
 	{'2', '\'', 0x2033},
 	{'3', '\'', 0x2034},
+	{'4', '\'', 0x2057},
 	{'1', '"', 0x2035},
 	{'2', '"', 0x2036},
 	{'3', '"', 0x2037},
@@ -2114,18 +2115,15 @@ f_digraph_getlist(typval_T *argvars, typval_T *rettv)
 # ifdef FEAT_DIGRAPHS
     int     flag_list_all;
 
-    if (in_vim9script() && check_for_opt_bool_arg(argvars, 0) == FAIL)
+    if (check_for_opt_bool_arg(argvars, 0) == FAIL)
 	return;
 
     if (argvars[0].v_type == VAR_UNKNOWN)
 	flag_list_all = FALSE;
     else
     {
-	int	    error = FALSE;
-	varnumber_T flag = tv_get_number_chk(&argvars[0], &error);
+	varnumber_T flag = tv_get_bool(&argvars[0]);
 
-	if (error)
-	    return;
 	flag_list_all = flag ? TRUE : FALSE;
     }
 
@@ -2314,7 +2312,7 @@ ex_loadkeymap(exarg_T *eap)
      */
     for (;;)
     {
-	line = eap->getline(0, eap->cookie, 0, TRUE);
+	line = eap->ea_getline(0, eap->cookie, 0, TRUE);
 	if (line == NULL)
 	    break;
 

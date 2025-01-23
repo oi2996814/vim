@@ -650,6 +650,7 @@ ac_subst_vars='LTLIBOBJS
 LIBOBJS
 LINK_AS_NEEDED
 DEPEND_CFLAGS_FILTER
+MSGFMTCMD
 MSGFMT_DESKTOP
 MAKEMO
 MSGFMT
@@ -825,6 +826,7 @@ with_global_runtime
 with_modified_by
 enable_smack
 enable_selinux
+enable_xattr
 with_features
 with_compiledby
 enable_xsmp
@@ -835,6 +837,7 @@ with_luajit
 enable_mzschemeinterp
 with_plthome
 enable_perlinterp
+with_xsubpp
 enable_pythoninterp
 with_python_command
 with_python_config_dir
@@ -1514,6 +1517,7 @@ Optional Features:
   --disable-darwin        Disable Darwin (Mac OS X) support.
   --disable-smack	  Do not check for Smack support.
   --disable-selinux	  Do not check for SELinux support.
+  --disable-xattr	  Do not check for XATTR support.
   --disable-xsmp          Disable XSMP session management
   --disable-xsmp-interact Disable XSMP interaction
   --enable-luainterp=OPTS      Include Lua interpreter.  default=no OPTS=no/yes/dynamic
@@ -1567,10 +1571,11 @@ Optional Packages:
   --with-lua-prefix=PFX   Prefix where Lua is installed.
   --with-luajit           Link with LuaJIT instead of Lua.
   --with-plthome=PLTHOME   Use PLTHOME.
+  --with-xsubpp=PATH  path to the xsubpp command
   --with-python-command=NAME  name of the Python 2 command (default: python2 or python)
   --with-python-config-dir=PATH  Python's config directory (deprecated)
   --with-python3-command=NAME  name of the Python 3 command (default: python3 or python)
-  --with-python3-stable-abi=VERSION  stable ABI version to target (e.g. 3.8)
+  --with-python3-stable-abi=VERSION  stable ABI version to target (default: 3.8)
   --with-python3-config-dir=PATH  Python's config directory (deprecated)
   --with-tclsh=PATH       which tclsh to use (default: tclsh8.0)
   --with-ruby-command=RUBY  name of the Ruby command (default: ruby)
@@ -5277,8 +5282,8 @@ else
 printf "%s\n" "yes" >&6; }
 fi
 if test "$enable_smack" = "yes"; then
-  ac_fn_c_check_header_compile "$LINENO" "attr/xattr.h" "ac_cv_header_attr_xattr_h" "$ac_includes_default"
-if test "x$ac_cv_header_attr_xattr_h" = xyes
+  ac_fn_c_check_header_compile "$LINENO" "sys/xattr.h" "ac_cv_header_sys_xattr_h" "$ac_includes_default"
+if test "x$ac_cv_header_sys_xattr_h" = xyes
 then :
   true
 else $as_nop
@@ -5417,6 +5422,31 @@ fi
      { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 printf "%s\n" "yes" >&6; }
   fi
+fi
+
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking --enable-xattr argument" >&5
+printf %s "checking --enable-xattr argument... " >&6; }
+# Check whether --enable-xattr was given.
+if test ${enable_xattr+y}
+then :
+  enableval=$enable_xattr;
+else $as_nop
+  enable_xattr="yes"
+fi
+
+if test "$enable_xattr" = "yes"; then
+  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+printf "%s\n" "yes" >&6; }
+  ac_fn_c_check_header_compile "$LINENO" "sys/xattr.h" "ac_cv_header_sys_xattr_h" "$ac_includes_default"
+if test "x$ac_cv_header_sys_xattr_h" = xyes
+then :
+  printf "%s\n" "#define HAVE_XATTR 1" >>confdefs.h
+
+fi
+
+else
+  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no" >&5
+printf "%s\n" "no" >&6; }
 fi
 
 
@@ -6428,24 +6458,57 @@ printf "%s\n" "OK" >&6; }
       vi_cv_perllib=`$vi_cv_path_perl -MConfig -e 'print $Config{privlibexp}'`
 
       vi_cv_perl_extutils=unknown_perl_extutils_path
-      for extutils_rel_path in ExtUtils vendor_perl/ExtUtils; do
-	xsubpp_path="$vi_cv_perllib/$extutils_rel_path/xsubpp"
-	if test -f "$xsubpp_path"; then
-	  vi_cv_perl_xsubpp="$xsubpp_path"
-	fi
-      done
 
-                              perlcppflags=`$vi_cv_path_perl -Mlib=$srcdir -MExtUtils::Embed \
+      { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking --with-xsubpp path" >&5
+printf %s "checking --with-xsubpp path... " >&6; }
+      vi_cv_perl_xsubpp=
+
+# Check whether --with-xsubpp was given.
+if test ${with_xsubpp+y}
+then :
+  withval=$with_xsubpp;
+            if test -f "$withval"
+            then
+	      vi_cv_perl_xsubpp="$withval"
+            fi
+
+fi
+
+
+      if test "x$vi_cv_perl_xsubpp" = "x"
+      then
+	for extutils_rel_path in ExtUtils vendor_perl/ExtUtils; do
+	  xsubpp_path="$vi_cv_perllib/$extutils_rel_path/xsubpp"
+	  if test -f "$xsubpp_path"; then
+	    vi_cv_perl_xsubpp="$xsubpp_path"
+	  fi
+	done
+      fi
+
+      if test "x$vi_cv_perl_xsubpp" = "x"
+      then
+        { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: empty" >&5
+printf "%s\n" "empty" >&6; }
+      else
+        { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $vi_cv_perl_xsubpp" >&5
+printf "%s\n" "$vi_cv_perl_xsubpp" >&6; }
+      fi
+
+
+                                    perlcppflags=`$vi_cv_path_perl -Mlib=$srcdir -MExtUtils::Embed \
 		-e 'ccflags;perl_inc;print"\n"' | sed -e 's/-fno[^ ]*//' \
 		-e 's/-fdebug-prefix-map[^ ]*//g' \
 		-e 's/-pipe //' \
+		-e 's/-flto\(=auto\)\? //' \
 		-e 's/-W[^ ]*//g' \
 		-e 's/-D_FORTIFY_SOURCE=.//g'`
-            perllibs=`cd $srcdir; $vi_cv_path_perl -MExtUtils::Embed -e 'ldopts' | \
+                  perllibs=`cd $srcdir; $vi_cv_path_perl -MExtUtils::Embed -e 'ldopts' | \
 		sed -e '/Warning/d' -e '/Note (probably harmless)/d' \
+			-e 's/-specs=[^ ]*//g' \
 			-e 's/-bE:perl.exp//' -e 's/-lc //'`
-                  perlldflags=`cd $srcdir; $vi_cv_path_perl -MExtUtils::Embed \
-		-e 'ccdlflags' | sed -e 's/-bE:perl.exp//'`
+                        perlldflags=`cd $srcdir; $vi_cv_path_perl -MExtUtils::Embed \
+		-e 'ccdlflags' | sed -e 's/-bE:perl.exp//' \
+		-e 's/-specs=[^ ]*//g' `
 
                   { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking if compile and link flags for Perl are sane" >&5
 printf %s "checking if compile and link flags for Perl are sane... " >&6; }
@@ -7020,14 +7083,21 @@ printf %s "checking Python is 3.0 or better... " >&6; }
       { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yep" >&5
 printf "%s\n" "yep" >&6; }
 
-            { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking --with-python3-stable-abi argument" >&5
+            python3_stable_abi_default=3.8
+      { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking --with-python3-stable-abi argument" >&5
 printf %s "checking --with-python3-stable-abi argument... " >&6; }
 
 
 # Check whether --with-python3-stable-abi was given.
 if test ${with_python3_stable_abi+y}
 then :
-  withval=$with_python3_stable_abi; vi_cv_var_python3_stable_abi="$withval"; { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $vi_cv_var_python3_stable_abi" >&5
+  withval=$with_python3_stable_abi;
+     if test "X$withval" = "Xyes"; then
+       vi_cv_var_python3_stable_abi=$python3_stable_abi_default
+     else
+       vi_cv_var_python3_stable_abi="$withval"
+     fi
+     { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $vi_cv_var_python3_stable_abi" >&5
 printf "%s\n" "$vi_cv_var_python3_stable_abi" >&6; }
 else $as_nop
   { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no" >&5
@@ -7045,7 +7115,7 @@ else $as_nop
          "major_minor='${vi_cv_var_python3_stable_abi}'.split('.'); print('0x{0:X}'.format( (int(major_minor.__getitem__(0))<<24) + (int(major_minor.__getitem__(1))<<16) ))"`
 fi
 
-        if test "X$vi_cv_var_python3_stable_abi_hex" == "X"; then
+        if test "X$vi_cv_var_python3_stable_abi_hex" = "X"; then
           as_fn_error $? "can't parse Python 3 stable ABI version. It should be \"<major>.<minor>\"" "$LINENO" 5
         fi
       fi
@@ -8075,7 +8145,7 @@ printf "%s\n" "$rubyhdrdir" >&6; }
 	librubyarg=`$vi_cv_path_ruby -r rbconfig -e "print $ruby_rbconfig.expand($ruby_rbconfig::CONFIG['LIBRUBYARG'])"`
 	librubya=`$vi_cv_path_ruby -r rbconfig -e "print $ruby_rbconfig.expand($ruby_rbconfig::CONFIG['LIBRUBY_A'])"`
 	rubylibdir=`$vi_cv_path_ruby -r rbconfig -e "print $ruby_rbconfig.expand($ruby_rbconfig::CONFIG['libdir'])"`
-	if test -f "$rubylibdir/$librubya" || expr "$librubyarg" : "-lruby"; then
+	if test -f "$rubylibdir/$librubya" || expr "$librubyarg" : "-lruby" >/dev/null; then
 	  RUBY_LIBS="$RUBY_LIBS -L$rubylibdir"
 	elif test "$librubyarg" = "libruby.a"; then
 	  	  librubyarg="-lruby"
@@ -10077,8 +10147,11 @@ system ("touch conf.gtktest");
 tmp_version = g_strdup("$min_gtk_version");
 if (sscanf(tmp_version, "%d.%d.%d", &major, &minor, &micro) != 3) {
    printf("%s, bad version string\n", "$min_gtk_version");
+   g_free(tmp_version);
    exit(1);
  }
+
+g_free(tmp_version);
 
 if ((gtk_major_version > major) ||
     ((gtk_major_version == major) && (gtk_minor_version > minor)) ||
@@ -10340,8 +10413,11 @@ system ("touch conf.gtktest");
 tmp_version = g_strdup("$min_gtk_version");
 if (sscanf(tmp_version, "%d.%d.%d", &major, &minor, &micro) != 3) {
    printf("%s, bad version string\n", "$min_gtk_version");
+   g_free(tmp_version);
    exit(1);
  }
+
+g_free(tmp_version);
 
 if ((gtk_major_version > major) ||
     ((gtk_major_version == major) && (gtk_minor_version > minor)) ||
@@ -11252,7 +11328,9 @@ else $as_nop
     if test "$cross_compiling" = yes
 then :
 
-    as_fn_error $? "cross-compiling: please set 'vim_cv_toupper_broken'" "$LINENO" 5
+    vim_cv_toupper_broken=no
+    { printf "%s\n" "$as_me:${as_lineno-$LINENO}: WARNING: cross-compiling: consider setting 'vim_cv_toupper_broken'" >&5
+printf "%s\n" "$as_me: WARNING: cross-compiling: consider setting 'vim_cv_toupper_broken'" >&2;}
 
 else $as_nop
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
@@ -11337,55 +11415,6 @@ else $as_nop
 printf "%s\n" "no" >&6; }
 fi
 rm -f core conftest.err conftest.$ac_objext conftest.beam conftest.$ac_ext
-
-ac_fn_c_check_header_compile "$LINENO" "elf.h" "ac_cv_header_elf_h" "$ac_includes_default"
-if test "x$ac_cv_header_elf_h" = xyes
-then :
-  HAS_ELF=1
-fi
-
-if test "$HAS_ELF" = 1; then
-  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for main in -lelf" >&5
-printf %s "checking for main in -lelf... " >&6; }
-if test ${ac_cv_lib_elf_main+y}
-then :
-  printf %s "(cached) " >&6
-else $as_nop
-  ac_check_lib_save_LIBS=$LIBS
-LIBS="-lelf  $LIBS"
-cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-
-
-int
-main (void)
-{
-return main ();
-  ;
-  return 0;
-}
-_ACEOF
-if ac_fn_c_try_link "$LINENO"
-then :
-  ac_cv_lib_elf_main=yes
-else $as_nop
-  ac_cv_lib_elf_main=no
-fi
-rm -f core conftest.err conftest.$ac_objext conftest.beam \
-    conftest$ac_exeext conftest.$ac_ext
-LIBS=$ac_check_lib_save_LIBS
-fi
-{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_elf_main" >&5
-printf "%s\n" "$ac_cv_lib_elf_main" >&6; }
-if test "x$ac_cv_lib_elf_main" = xyes
-then :
-  printf "%s\n" "#define HAVE_LIBELF 1" >>confdefs.h
-
-  LIBS="-lelf $LIBS"
-
-fi
-
-fi
 
 ac_header_dirent=no
 for ac_hdr in dirent.h sys/ndir.h sys/dir.h ndir.h; do
@@ -12719,7 +12748,7 @@ fi
     if test "x$olibs" != "x$LIBS"; then
                         if test "$cross_compiling" = yes
 then :
-  res="FAIL"
+  res="OK"
 else $as_nop
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
@@ -12795,7 +12824,9 @@ else $as_nop
     if test "$cross_compiling" = yes
 then :
 
-      as_fn_error $? "cross-compiling: please set 'vim_cv_terminfo'" "$LINENO" 5
+      vim_cv_terminfo=yes
+      { printf "%s\n" "$as_me:${as_lineno-$LINENO}: WARNING: cross-compiling: consider setting 'vim_cv_terminfo'" >&5
+printf "%s\n" "$as_me: WARNING: cross-compiling: consider setting 'vim_cv_terminfo'" >&2;}
 
 else $as_nop
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
@@ -12813,17 +12844,17 @@ else $as_nop
 # include <stddef.h>
 #endif
 int main()
-{char *s; s=(char *)tgoto("%p1%d", 0, 1); exit(!strcmp(s==0 ? "" : s, "1")); }
+{char *s; s=(char *)tgoto("%p1%d", 0, 1); exit(!!strcmp(s==0 ? "" : s, "1")); }
 
 _ACEOF
 if ac_fn_c_try_run "$LINENO"
 then :
 
-      vim_cv_terminfo=no
+      vim_cv_terminfo=yes
 
 else $as_nop
 
-      vim_cv_terminfo=yes
+      vim_cv_terminfo=no
 
 fi
 rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext \
@@ -12850,7 +12881,9 @@ else $as_nop
     if test "$cross_compiling" = yes
 then :
 
-      as_fn_error $? "failed to compile test program." "$LINENO" 5
+      vim_cv_tgetent=zero
+      { printf "%s\n" "$as_me:${as_lineno-$LINENO}: WARNING: cross-compiling: consider setting 'vim_cv_tgetent'" >&5
+printf "%s\n" "$as_me: WARNING: cross-compiling: consider setting 'vim_cv_tgetent'" >&2;}
 
 else $as_nop
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
@@ -13226,7 +13259,9 @@ else $as_nop
     if test "$cross_compiling" = yes
 then :
 
-      as_fn_error $? "cross-compiling: please set 'vim_cv_getcwd_broken'" "$LINENO" 5
+      vim_cv_getcwd_broken=no
+      { printf "%s\n" "$as_me:${as_lineno-$LINENO}: WARNING: cross-compiling: consider setting 'vim_cv_getcwd_broken'" >&5
+printf "%s\n" "$as_me: WARNING: cross-compiling: consider setting 'vim_cv_getcwd_broken'" >&2;}
 
 else $as_nop
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
@@ -13605,6 +13640,12 @@ ac_fn_c_check_func "$LINENO" "clock_gettime" "ac_cv_func_clock_gettime"
 if test "x$ac_cv_func_clock_gettime" = xyes
 then :
   printf "%s\n" "#define HAVE_CLOCK_GETTIME 1" >>confdefs.h
+
+fi
+ac_fn_c_check_func "$LINENO" "sync" "ac_cv_func_sync"
+if test "x$ac_cv_func_sync" = xyes
+then :
+  printf "%s\n" "#define HAVE_SYNC 1" >>confdefs.h
 
 fi
 
@@ -14122,50 +14163,29 @@ then :
   printf %s "(cached) " >&6
 else $as_nop
 
-if test "$cross_compiling" = yes
-then :
-  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: WARNING: failed to build test program; if cross-compiling please set 'vim_cv_timer_create'" >&5
-printf "%s\n" "$as_me: WARNING: failed to build test program; if cross-compiling please set 'vim_cv_timer_create'" >&2;}
-
-else $as_nop
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
 
-#if STDC_HEADERS
-# include <stdlib.h>
-# include <stddef.h>
-#endif
-#include <signal.h>
-#include <time.h>
-static void set_flag(union sigval sv) {}
+  #include <time.h>
 
 int
 main (void)
 {
 
-  struct timespec ts;
-  struct sigevent action = {0};
-  timer_t timer_id;
-
-  action.sigev_notify = SIGEV_THREAD;
-  action.sigev_notify_function = set_flag;
-  if (timer_create(CLOCK_MONOTONIC, &action, &timer_id) < 0)
-    exit(1);  // cannot create a monotonic timer
+    timer_create(CLOCK_MONOTONIC, NULL, NULL);
 
   ;
   return 0;
 }
 _ACEOF
-if ac_fn_c_try_run "$LINENO"
+if ac_fn_c_try_compile "$LINENO"
 then :
   vim_cv_timer_create=yes
 else $as_nop
   vim_cv_timer_create=no
-fi
-rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext \
-  conftest.$ac_objext conftest.beam conftest.$ac_ext
-fi
 
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam conftest.$ac_ext
 fi
 { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $vim_cv_timer_create" >&5
 printf "%s\n" "$vim_cv_timer_create" >&6; }
@@ -14180,10 +14200,56 @@ then :
   printf %s "(cached) " >&6
 else $as_nop
 
+    cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+    #include <time.h>
+
+int
+main (void)
+{
+
+      timer_create(CLOCK_MONOTONIC, NULL, NULL);
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"
+then :
+  vim_cv_timer_create_with_lrt=yes
+else $as_nop
+  vim_cv_timer_create_with_lrt=no
+
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam conftest.$ac_ext
+fi
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $vim_cv_timer_create_with_lrt" >&5
+printf "%s\n" "$vim_cv_timer_create_with_lrt" >&6; }
+  LIBS="$save_LIBS"
+else
+  vim_cv_timer_create_with_lrt=no
+fi
+
+if test "x$vim_cv_timer_create" = "xyes" ||
+   test "x$vim_cv_timer_create_with_lrt" = "xyes"; then
+  save_LIBS="$LIBS"
+  if test "x$vim_cv_timer_create_with_lrt" = "xyes" ; then
+    LIBS="$LIBS -lrt"
+  fi
+
+  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking if timer_create works" >&5
+printf %s "checking if timer_create works... " >&6; }
+if test ${vim_cv_timer_create_works+y}
+then :
+  printf %s "(cached) " >&6
+else $as_nop
+
     if test "$cross_compiling" = yes
 then :
-  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: WARNING: failed to build test program; if cross-compiling please set 'vim_cv_timer_create_with_lrt'" >&5
-printf "%s\n" "$as_me: WARNING: failed to build test program; if cross-compiling please set 'vim_cv_timer_create_with_lrt'" >&2;}
+  vim_cv_timer_create_works=yes
+      { printf "%s\n" "$as_me:${as_lineno-$LINENO}: WARNING: cross-compiling: consider setting 'vim_cv_timer_create_works'" >&5
+printf "%s\n" "$as_me: WARNING: cross-compiling: consider setting 'vim_cv_timer_create_works'" >&2;}
 
 else $as_nop
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
@@ -14208,7 +14274,7 @@ main (void)
       action.sigev_notify = SIGEV_THREAD;
       action.sigev_notify_function = set_flag;
       if (timer_create(CLOCK_MONOTONIC, &action, &timer_id) < 0)
-	exit(1);  // cannot create a monotonic timer
+        exit(1);  // cannot create a monotonic timer
 
   ;
   return 0;
@@ -14216,30 +14282,24 @@ main (void)
 _ACEOF
 if ac_fn_c_try_run "$LINENO"
 then :
-  vim_cv_timer_create_with_lrt=yes
+  vim_cv_timer_create_works=yes
 else $as_nop
-  vim_cv_timer_create_with_lrt=no
+  vim_cv_timer_create_works=no
 fi
 rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext \
   conftest.$ac_objext conftest.beam conftest.$ac_ext
 fi
 
 fi
-{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $vim_cv_timer_create_with_lrt" >&5
-printf "%s\n" "$vim_cv_timer_create_with_lrt" >&6; }
-  LIBS="$save_LIBS"
-else
-  vim_cv_timer_create_with_lrt=no
-fi
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $vim_cv_timer_create_works" >&5
+printf "%s\n" "$vim_cv_timer_create_works" >&6; }
 
-if test "x$vim_cv_timer_create" = "xyes" ; then
-  printf "%s\n" "#define HAVE_TIMER_CREATE 1" >>confdefs.h
+  if test "x$vim_cv_timer_create_works" = "xyes" ; then
+    printf "%s\n" "#define HAVE_TIMER_CREATE 1" >>confdefs.h
 
-fi
-if test "x$vim_cv_timer_create_with_lrt" = "xyes" ; then
-  printf "%s\n" "#define HAVE_TIMER_CREATE 1" >>confdefs.h
-
-  LIBS="$LIBS -lrt"
+  else
+    LIBS="$save_LIBS"
+  fi
 fi
 
 { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether stat() ignores a trailing slash" >&5
@@ -14252,7 +14312,9 @@ else $as_nop
     if test "$cross_compiling" = yes
 then :
 
-      as_fn_error $? "cross-compiling: please set 'vim_cv_stat_ignores_slash'" "$LINENO" 5
+      vim_cv_stat_ignores_slash=yes
+      { printf "%s\n" "$as_me:${as_lineno-$LINENO}: WARNING: cross-compiling: consider setting 'vim_cv_stat_ignores_slash'" >&5
+printf "%s\n" "$as_me: WARNING: cross-compiling: consider setting 'vim_cv_stat_ignores_slash'" >&2;}
 
 else $as_nop
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
@@ -15387,8 +15449,8 @@ printf "%s\n" "#define VIM_SIZEOF_LONG $ac_cv_sizeof_long" >>confdefs.h
 printf %s "checking uint32_t is 32 bits... " >&6; }
 if test "$cross_compiling" = yes
 then :
-  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: WARNING: cannot check uint32_t when cross-compiling." >&5
-printf "%s\n" "$as_me: WARNING: cannot check uint32_t when cross-compiling." >&2;}
+  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: WARNING: assuming uint32_t is correct when cross-compiling" >&5
+printf "%s\n" "$as_me: WARNING: assuming uint32_t is correct when cross-compiling" >&2;}
 else $as_nop
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
@@ -15451,7 +15513,9 @@ else $as_nop
     if test "$cross_compiling" = yes
 then :
 
-	as_fn_error $? "cross-compiling: please set 'vim_cv_memmove_handles_overlap'" "$LINENO" 5
+	vim_cv_memmove_handles_overlap=yes
+	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: WARNING: cross-compiling: consider setting 'vim_cv_memmove_handles_overlap'" >&5
+printf "%s\n" "$as_me: WARNING: cross-compiling: consider setting 'vim_cv_memmove_handles_overlap'" >&2;}
 
 else $as_nop
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
@@ -15491,7 +15555,9 @@ else $as_nop
       if test "$cross_compiling" = yes
 then :
 
-	as_fn_error $? "cross-compiling: please set 'vim_cv_bcopy_handles_overlap'" "$LINENO" 5
+	vim_cv_bcopy_handles_overlap=yes
+	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: WARNING: cross-compiling: consider setting 'vim_cv_bcopy_handles_overlap'" >&5
+printf "%s\n" "$as_me: WARNING: cross-compiling: consider setting 'vim_cv_bcopy_handles_overlap'" >&2;}
 
 else $as_nop
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
@@ -15531,7 +15597,9 @@ else $as_nop
 	if test "$cross_compiling" = yes
 then :
 
-	    as_fn_error $? "cross-compiling: please set 'vim_cv_memcpy_handles_overlap'" "$LINENO" 5
+	    vim_cv_memcpy_handles_overlap=yes
+	    { printf "%s\n" "$as_me:${as_lineno-$LINENO}: WARNING: cross-compiling: consider setting 'vim_cv_memcpy_handles_overlap'" >&5
+printf "%s\n" "$as_me: WARNING: cross-compiling: consider setting 'vim_cv_memcpy_handles_overlap'" >&2;}
 
 else $as_nop
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
@@ -15856,6 +15924,30 @@ then :
 
 fi
 
+      { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for dgettext" >&5
+printf %s "checking for dgettext... " >&6; }
+      cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+#include <libintl.h>
+int
+main (void)
+{
+dgettext("Test", "Test");
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"
+then :
+  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+printf "%s\n" "yes" >&6; }; printf "%s\n" "#define HAVE_DGETTEXT 1" >>confdefs.h
+
+else $as_nop
+  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no" >&5
+printf "%s\n" "no" >&6; }
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam \
+    conftest$ac_exeext conftest.$ac_ext
             { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for _nl_msg_cat_cntr" >&5
 printf %s "checking for _nl_msg_cat_cntr... " >&6; }
       cat confdefs.h - <<_ACEOF >conftest.$ac_ext
@@ -15896,6 +15988,18 @@ printf "%s\n" "yes" >&6; }
       else
 	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no" >&5
 printf "%s\n" "no" >&6; }
+      fi
+
+      { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking if $MSGFMT supports --no-convert" >&5
+printf %s "checking if $MSGFMT supports --no-convert... " >&6; }
+      if "$MSGFMT" --help | grep -q --  '--no-convert' >/dev/null; then
+        { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+printf "%s\n" "yes" >&6; }
+        MSGFMTCMD="OLD_PO_FILE_INPUT=yes $MSGFMT --no-convert -v"
+      else
+        { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no" >&5
+printf "%s\n" "no" >&6; }
+        MSGFMTCMD="OLD_PO_FILE_INPUT=yes $MSGFMT -v"
       fi
 
     fi

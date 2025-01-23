@@ -20,7 +20,9 @@ SCRIPTS_TINY = \
 	test24 \
 	test25 \
 	test26 \
-	test27
+	test27 \
+	test28 \
+	test29
 
 SCRIPTS_TINY_OUT = \
 	test10.out \
@@ -31,7 +33,9 @@ SCRIPTS_TINY_OUT = \
 	test24.out \
 	test25.out \
 	test26.out \
-	test27.out
+	test27.out \
+	test28.out \
+	test29.out
 
 # Tests for Vim9 script.
 TEST_VIM9 = \
@@ -40,11 +44,14 @@ TEST_VIM9 = \
 	test_vim9_class \
 	test_vim9_cmd \
 	test_vim9_disassemble \
+	test_vim9_enum \
 	test_vim9_expr \
 	test_vim9_fails \
 	test_vim9_func \
 	test_vim9_import \
-	test_vim9_script
+	test_vim9_python3 \
+	test_vim9_script \
+	test_vim9_typealias
 
 TEST_VIM9_RES = \
 	test_vim9_assign.res \
@@ -52,11 +59,14 @@ TEST_VIM9_RES = \
 	test_vim9_class.res \
 	test_vim9_cmd.res \
 	test_vim9_disassemble.res \
+	test_vim9_enum.res \
 	test_vim9_expr.res \
 	test_vim9_fails.res \
 	test_vim9_func.res \
 	test_vim9_import.res \
-	test_vim9_script.res
+	test_vim9_python3.res \
+	test_vim9_script.res \
+	test_vim9_typealias.res
 
 # Benchmark scripts.
 SCRIPTS_BENCH = test_bench_regexp.res
@@ -105,6 +115,7 @@ NEW_TESTS = \
 	test_conceal \
 	test_const \
 	test_cpoptions \
+	test_crash \
 	test_crypt \
 	test_cscope \
 	test_cursor_func \
@@ -138,6 +149,7 @@ NEW_TESTS = \
 	test_file_perm \
 	test_file_size \
 	test_filechanged \
+	test_filecopy \
 	test_fileformat \
 	test_filetype \
 	test_filter_cmd \
@@ -155,10 +167,15 @@ NEW_TESTS = \
 	test_function_lists \
 	test_ga \
 	test_getcwd \
+	test_gettext \
+	test_gettext_cp1251 \
+	test_gettext_utf8 \
+	test_gettext_make \
 	test_getvar \
 	test_gf \
 	test_glob2regpat \
 	test_global \
+	test_glvs \
 	test_gn \
 	test_goto \
 	test_gui \
@@ -203,6 +220,7 @@ NEW_TESTS = \
 	test_matchadd_conceal \
 	test_matchadd_conceal_utf8 \
 	test_matchfuzzy \
+	test_matchparen \
 	test_memory_usage \
 	test_menu \
 	test_messages \
@@ -219,6 +237,7 @@ NEW_TESTS = \
 	test_normal \
 	test_number \
 	test_options \
+	test_options_all \
 	test_packadd \
 	test_partial \
 	test_paste \
@@ -244,6 +263,7 @@ NEW_TESTS = \
 	test_regexp_utf8 \
 	test_registers \
 	test_reltime \
+	test_remote \
 	test_rename \
 	test_restricted \
 	test_retab \
@@ -271,6 +291,8 @@ NEW_TESTS = \
 	test_spell \
 	test_spell_utf8 \
 	test_spellfile \
+	test_spellrare \
+	test_stacktrace \
 	test_startup \
 	test_startup_utf8 \
 	test_stat \
@@ -300,6 +322,7 @@ NEW_TESTS = \
 	test_textobjects \
 	test_textprop \
 	test_timers \
+	test_tohtml \
 	test_true_false \
 	test_trycatch \
 	test_undo \
@@ -320,10 +343,13 @@ NEW_TESTS = \
 	test_window_cmd \
 	test_window_id \
 	test_windows_home \
+	test_winfixbuf \
 	test_wnext \
 	test_wordcount \
 	test_writefile \
+	test_xdg \
 	test_xxd \
+	test_zip_plugin \
 	test_alot_latin \
 	test_alot_utf8 \
 	test_alot
@@ -369,6 +395,7 @@ NEW_TESTS_RES = \
 	test_conceal.res \
 	test_const.res \
 	test_cpoptions.res \
+	test_crash.res \
 	test_crypt.res \
 	test_cscope.res \
 	test_cursor_func.res \
@@ -393,6 +420,7 @@ NEW_TESTS_RES = \
 	test_expr.res \
 	test_file_size.res \
 	test_filechanged.res \
+	test_filecopy.res \
 	test_fileformat.res \
 	test_filetype.res \
 	test_filter_cmd.res \
@@ -407,8 +435,13 @@ NEW_TESTS_RES = \
 	test_functions.res \
 	test_function_lists.res \
 	test_getcwd.res \
+	test_gettext.res \
+	test_gettext_cp1251.res \
+	test_gettext_utf8.res \
+	test_gettext_make.res \
 	test_getvar.res \
 	test_gf.res \
+	test_glvs.res \
 	test_gn.res \
 	test_goto.res \
 	test_gui.res \
@@ -452,6 +485,7 @@ NEW_TESTS_RES = \
 	test_matchadd_conceal.res \
 	test_matchadd_conceal_utf8.res \
 	test_matchfuzzy.res \
+	test_matchparen.res \
 	test_memory_usage.res \
 	test_menu.res \
 	test_messages.res \
@@ -466,6 +500,7 @@ NEW_TESTS_RES = \
 	test_normal.res \
 	test_number.res \
 	test_options.res \
+	test_options_all.res \
 	test_packadd.res \
 	test_partial.res \
 	test_paste.res \
@@ -487,6 +522,7 @@ NEW_TESTS_RES = \
 	test_recover.res \
 	test_regex_char_classes.res \
 	test_registers.res \
+	test_remote.res \
 	test_rename.res \
 	test_restricted.res \
 	test_retab.res \
@@ -509,6 +545,8 @@ NEW_TESTS_RES = \
 	test_spell.res \
 	test_spell_utf8.res \
 	test_spellfile.res \
+	test_spellrare.res \
+	test_stacktrace.res \
 	test_startup.res \
 	test_stat.res \
 	test_statusline.res \
@@ -534,6 +572,7 @@ NEW_TESTS_RES = \
 	test_textobjects.res \
 	test_textprop.res \
 	test_timers.res \
+	test_tohtml.res \
 	test_true_false.res \
 	test_trycatch.res \
 	test_undo.res \
@@ -550,9 +589,12 @@ NEW_TESTS_RES = \
 	test_window_cmd.res \
 	test_window_id.res \
 	test_windows_home.res \
+	test_winfixbuf.res \
 	test_wordcount.res \
 	test_writefile.res \
+	test_xdg.res \
 	test_xxd.res \
+	test_zip_plugin.res \
 	test_alot_latin.res \
 	test_alot_utf8.res \
 	test_alot.res

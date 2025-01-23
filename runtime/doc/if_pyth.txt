@@ -1,4 +1,4 @@
-*if_pyth.txt*   For Vim version 9.0.  Last change: 2022 Feb 22
+*if_pyth.txt*   For Vim version 9.1.  Last change: 2024 Nov 09
 
 
 		  VIM REFERENCE MANUAL    by Paul Moore
@@ -201,6 +201,10 @@ vim.eval(str)						*python-eval*
 	[{'cmd': '/^eval_expr(arg, nextcmd)$/', 'static': 0, 'name': ~
 	'eval_expr', 'kind': 'f', 'filename': './src/eval.c'}] ~
 
+	NOTE: In Vim9 script, local variables in def functions are not visible
+	to python evaluations. To pass local variables to python evaluations,
+	use the {locals} dict when calling |py3eval()| and friends.
+
 vim.bindeval(str)					*python-bindeval*
 	Like |python-eval|, but returns special objects described in
 	|python-bindeval-objects|. These python objects let you modify (|List|
@@ -343,7 +347,8 @@ In python vim.VIM_SPECIAL_PATH special directory is used as a replacement for
 the list of paths found in 'runtimepath': with this directory in sys.path and
 vim.path_hooks in sys.path_hooks python will try to load module from
 {rtp}/python2 (or python3) and {rtp}/pythonx (for both python versions) for
-each {rtp} found in 'runtimepath'.
+each {rtp} found in 'runtimepath' (Note: find_module() has been removed from
+imp module around Python 3.12.0a7).
 
 Implementation is similar to the following, but written in C: >
 
@@ -404,10 +409,12 @@ vim.VIM_SPECIAL_PATH					*python-VIM_SPECIAL_PATH*
 
 vim.find_module(...)					*python-find_module*
 vim.path_hook(path)					*python-path_hook*
+vim.find_spec(...)					*python-find_spec*
 	Methods or objects used to implement path loading as described above.
 	You should not be using any of these directly except for vim.path_hook
-	in case you need to do something with sys.meta_path. It is not
-	guaranteed that any of the objects will exist in the future vim
+	in case you need to do something with sys.meta_path, vim.find_spec()
+	is available starting with Python 3.7.
+	It is not guaranteed that any of the objects will exist in future vim
 	versions.
 
 vim._get_paths						*python-_get_paths*
@@ -524,7 +531,7 @@ The range object methods are:
 
 Range object type is available using "Range" attribute of vim module.
 
-Example (assume r is the current range):
+Example (assume r is the current range): >
 	# Send all lines in a range to the default printer
 	vim.command("%d,%dhardcopy!" % (r.start+1,r.end+1))
 
@@ -738,6 +745,10 @@ To facilitate bi-directional interface, you can use |pyeval()| and |py3eval()|
 functions to evaluate Python expressions and pass their values to Vim script.
 |pyxeval()| is also available.
 
+You can inject local variables into the evaluation using the optional {locals}
+dict. This can be particularly useful in vim9script where vim.eval
+|python-eval| will not find locals in a def func.
+
 The Python value "None" is converted to v:none.
 
 ==============================================================================
@@ -754,8 +765,10 @@ you can use Vim without this file.
 MS-Windows ~
 
 To use the Python interface the Python DLL must be in your search path.  In a
-console window type "path" to see what directories are used.  The 'pythondll'
-or 'pythonthreedll' option can be also used to specify the Python DLL.
+console window type "path" to see what directories are used.  If the DLL is
+not found in your search path, Vim will check the registry to find the path
+where Python is installed.  The 'pythondll' or 'pythonthreedll' option can be
+also used to specify the Python DLL.
 
 The name of the DLL should match the Python version Vim was compiled with.
 Currently the name for Python 2 is "python27.dll", that is for Python 2.7.
@@ -782,6 +795,8 @@ and failures.  With Stable ABI, this restriction is relaxed, and any Python 3
 library with version of at least |v:python3_version| will work.  See
 |has-python| for how to check if Stable ABI is supported, or see if version
 output includes |+python3/dyn-stable|.
+On MS-Windows, 'pythonthreedll' will be set to "python3.dll".  When searching
+the DLL from the registry, Vim will search the latest version of Python.
 
 ==============================================================================
 10. Python 3						*python3*

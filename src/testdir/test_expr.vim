@@ -36,11 +36,13 @@ func Test_version()
   call assert_true(has('patch-7.1.999'))
   call assert_true(has('patch-7.4.123'))
   call assert_true(has('patch-7.4.123 ')) " Trailing space can be allowed.
+  call assert_true(has('patch-9.1.0'))
+  call assert_true(has('patch-9.1.0000'))
 
   call assert_false(has('patch-7'))
   call assert_false(has('patch-7.4'))
   call assert_false(has('patch-7.4.'))
-  call assert_false(has('patch-9.1.0'))
+  call assert_false(has('patch-9.2.0'))
   call assert_false(has('patch-9.9.1'))
 
   call assert_false(has('patch-abc'))
@@ -927,7 +929,7 @@ func Test_string_interp()
     #" String conversion.
     call assert_equal('hello from ' .. v:version, $"hello from {v:version}")
     call assert_equal('hello from ' .. v:version, $'hello from {v:version}')
-    #" Paper over a small difference between VimScript behaviour.
+    #" Paper over a small difference between Vim script behaviour.
     call assert_equal(string(v:true), $"{v:true}")
     call assert_equal('(1+1=2)', $"(1+1={1 + 1})")
     #" Hex-escaped opening brace: char2nr('{') == 0x7b
@@ -947,6 +949,22 @@ func Test_string_interp()
       echo "${ LET tmp += 1 }"
     endif
     call assert_equal(0, tmp)
+
+    #" Dict interpolation
+    VAR d = {'a': 10, 'b': [1, 2]}
+    call assert_equal("{'a': 10, 'b': [1, 2]}", $'{d}')
+    VAR emptydict = {}
+    call assert_equal("a{}b", $'a{emptydict}b')
+    VAR nulldict = test_null_dict()
+    call assert_equal("a{}b", $'a{nulldict}b')
+
+    #" List interpolation
+    VAR l = ['a', 'b', 'c']
+    call assert_equal("['a', 'b', 'c']", $'{l}')
+    VAR emptylist = []
+    call assert_equal("a[]b", $'a{emptylist}b')
+    VAR nulllist = test_null_list()
+    call assert_equal("a[]b", $'a{nulllist}b')
 
     #" Stray closing brace.
     call assert_fails('echo $"moo}"', 'E1278:')
@@ -1041,6 +1059,50 @@ func Test_bitwise_shift()
      assert_equal(16, a)
   END
   call v9.CheckDefAndScriptSuccess(lines)
+
+  let lines =<< trim END
+    # Use in a lambda function
+    const DivBy2Ref_A = (n: number): number => n >> 1
+    assert_equal(16, DivBy2Ref_A(32))
+    const DivBy2Ref_B = (n: number): number => (<number>n) >> 1
+    assert_equal(16, DivBy2Ref_B(32))
+    const MultBy2Ref_A = (n: number): number => n << 1
+    assert_equal(8, MultBy2Ref_A(4))
+    const MultBy2Ref_B = (n: number): number => (<number>n) << 1
+    assert_equal(8, MultBy2Ref_B(4))
+
+    def DivBy2_A(): func(number): number
+      return (n: number): number => n >> 1
+    enddef
+    assert_equal(16, DivBy2_A()(32))
+    def DivBy2_B(): func(number): number
+      return (n: number): number => (<number>n) >> 1
+    enddef
+    assert_equal(16, DivBy2_B()(32))
+    def MultBy2_A(): func(number): number
+      return (n: number): number => n << 1
+    enddef
+    assert_equal(64, MultBy2_A()(32))
+    def MultBy2_B(): func(number): number
+      return (n: number): number => (<number>n) << 1
+    enddef
+    assert_equal(64, MultBy2_B()(32))
+  END
+  call v9.CheckDefAndScriptSuccess(lines)
+
+  " Use in a legacy lambda function
+  const DivBy2Ref_A = {n -> n >> 1}
+  call assert_equal(16, DivBy2Ref_A(32))
+  func DivBy2_A()
+    return {n -> n >> 1}
+  endfunc
+  call assert_equal(16, DivBy2_A()(32))
+  const MultBy2Ref_A = {n -> n << 1}
+  call assert_equal(64, MultBy2Ref_A(32))
+  func MultBy2_A()
+    return {n -> n << 1}
+  endfunc
+  call assert_equal(64, MultBy2_A()(32))
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

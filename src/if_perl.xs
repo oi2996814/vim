@@ -24,17 +24,6 @@
 # define _USE_32BIT_TIME_T
 #endif
 
-/*
- * Prevent including winsock.h.  perl.h tries to detect whether winsock.h is
- * already included before including winsock2.h, because winsock2.h isn't
- * compatible with winsock.h.  However the detection doesn't work with some
- * versions of MinGW.  If WIN32_LEAN_AND_MEAN is defined, windows.h will not
- * include winsock.h.
- */
-#ifdef WIN32
-# define WIN32_LEAN_AND_MEAN
-#endif
-
 #include "vim.h"
 
 #ifdef _MSC_VER
@@ -44,6 +33,11 @@
 # define __builtin_expect(expr, val) (expr)
 // Work around for using MSVC and Strawberry Perl 5.32.
 # define NO_THREAD_SAFE_LOCALE
+#endif
+
+#if defined(MSWIN) && defined(DYNAMIC_PERL)
+// Work around for warning C4273 (inconsistent DLL linkage).
+# define PERL_EXT_RE_BUILD
 #endif
 
 #ifdef __GNUC__
@@ -166,7 +160,13 @@ typedef int XSUBADDR_t;
 typedef int perl_key;
 # endif
 
-# ifndef MSWIN
+# ifdef MSWIN
+#  define PERL_PROC FARPROC
+#  define load_dll vimLoadLib
+#  define symbol_from_dll GetProcAddress
+#  define close_dll FreeLibrary
+#  define load_dll_error GetWin32Error
+# else
 #  include <dlfcn.h>
 #  define HANDLE void*
 #  define PERL_PROC void*
@@ -174,12 +174,6 @@ typedef int perl_key;
 #  define symbol_from_dll dlsym
 #  define close_dll dlclose
 #  define load_dll_error dlerror
-# else
-#  define PERL_PROC FARPROC
-#  define load_dll vimLoadLib
-#  define symbol_from_dll GetProcAddress
-#  define close_dll FreeLibrary
-#  define load_dll_error GetWin32Error
 # endif
 /*
  * Wrapper defines
@@ -315,6 +309,9 @@ typedef int perl_key;
 #   define PL_thr_key *dll_PL_thr_key
 #  endif
 # endif
+# ifdef PERL_USE_THREAD_LOCAL
+#  define PL_current_context *dll_PL_current_context
+# endif
 # define Perl_hv_iternext_flags dll_Perl_hv_iternext_flags
 # define Perl_hv_iterinit dll_Perl_hv_iterinit
 # define Perl_hv_iterkey dll_Perl_hv_iterkey
@@ -335,7 +332,7 @@ typedef int perl_key;
  */
 static HANDLE hPerlLib = NULL;
 
-static PerlInterpreter* (*perl_alloc)();
+static PerlInterpreter* (*perl_alloc)(void);
 static void (*perl_construct)(PerlInterpreter*);
 static void (*perl_destruct)(PerlInterpreter*);
 static void (*perl_free)(PerlInterpreter*);
@@ -483,6 +480,9 @@ static GV** (*Perl_Idefgv_ptr)(register PerlInterpreter*);
 static GV** (*Perl_Ierrgv_ptr)(register PerlInterpreter*);
 static SV* (*Perl_Isv_yes_ptr)(register PerlInterpreter*);
 static perl_key* (*Perl_Gthr_key_ptr)_((pTHX));
+# endif
+# ifdef PERL_USE_THREAD_LOCAL
+static void** dll_PL_current_context;
 # endif
 static void (*boot_DynaLoader)_((pTHX_ CV*));
 static HE * (*Perl_hv_iternext_flags)(pTHX_ HV *, I32);
@@ -633,6 +633,9 @@ static struct {
 #  ifdef USE_ITHREADS
     {"PL_thr_key", (PERL_PROC*)&dll_PL_thr_key},
 #  endif
+# ifdef PERL_USE_THREAD_LOCAL
+    {"PL_current_context", (PERL_PROC*)&dll_PL_current_context},
+# endif
 # else
     {"Perl_Idefgv_ptr", (PERL_PROC*)&Perl_Idefgv_ptr},
     {"Perl_Ierrgv_ptr", (PERL_PROC*)&Perl_Ierrgv_ptr},
@@ -1365,7 +1368,7 @@ ex_perldo(exarg_T *eap)
 	PUSHMARK(sp);
 	perl_call_pv("VIM::perldo", G_SCALAR | G_EVAL);
 	str = SvPV(GvSV(PL_errgv), length);
-	if (length || curbuf != was_curbuf)
+	if (length || curbuf != was_curbuf || i > curbuf->b_ml.ml_line_count)
 	    break;
 	SPAGAIN;
 	if (SvTRUEx(POPs))
@@ -1474,7 +1477,7 @@ vim_IOLayer_init(void)
 
 # if (PERL_REVISION == 5) && (PERL_VERSION >= 18)
 #  undef Perl_sv_free2
-void Perl_sv_free2(pTHX_ SV* sv, const U32 refcnt)
+void Perl_sv_free2(pTHX_ SV *const sv, const U32 refcnt)
 {
     (*dll_Perl_sv_free2)(aTHX_ sv, refcnt);
 }
@@ -1510,14 +1513,10 @@ NV Perl_sv_2nv_flags(pTHX_ SV *const sv, const I32 flags)
 
 # ifdef PERL589_OR_LATER
 #  undef Perl_sv_2iv_flags
-IV Perl_sv_2iv_flags(pTHX_ SV* sv, I32 flags)
+IV Perl_sv_2iv_flags(pTHX_ SV *const sv, const I32 flags)
 {
     return (*dll_Perl_sv_2iv_flags)(aTHX_ sv, flags);
 }
-# endif
-
-# ifdef PERL_USE_THREAD_LOCAL
-PERL_THREAD_LOCAL void *PL_current_context;
 # endif
 
 #endif // DYNAMIC_PERL
