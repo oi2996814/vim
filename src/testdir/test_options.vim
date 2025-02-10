@@ -4,6 +4,8 @@ source shared.vim
 source check.vim
 source view_util.vim
 
+scriptencoding utf-8
+
 func Test_whichwrap()
   set whichwrap=b,s
   call assert_equal('b,s', &whichwrap)
@@ -228,6 +230,11 @@ func Test_keymap_valid()
   call assert_fails(":set kmp=trunc\x00name", "trunc")
 endfunc
 
+func Test_wildchar_valid()
+  call assert_fails("set wildchar=<CR>", "E474:")
+  call assert_fails("set wildcharm=<C-C>", "E474:")
+endfunc
+
 func Check_dir_option(name)
   " Check that it's possible to set the option.
   exe 'set ' . a:name . '=/usr/share/dict/words'
@@ -295,11 +302,11 @@ func Test_set_completion()
   call assert_equal('"set tabstop thesaurus thesaurusfunc ttyscroll', @:)
 
   " Expand current value
-  call feedkeys(":set fileencodings=\<C-A>\<C-B>\"\<CR>", 'tx')
-  call assert_equal('"set fileencodings=ucs-bom,utf-8,default,latin1', @:)
+  call feedkeys(":set suffixes=\<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"set suffixes=.bak,~,.o,.h,.info,.swp,.obj', @:)
 
-  call feedkeys(":set fileencodings:\<C-A>\<C-B>\"\<CR>", 'tx')
-  call assert_equal('"set fileencodings:ucs-bom,utf-8,default,latin1', @:)
+  call feedkeys(":set suffixes:\<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"set suffixes:.bak,~,.o,.h,.info,.swp,.obj', @:)
 
   " Expand key codes.
   call feedkeys(":set <H\<C-A>\<C-B>\"\<CR>", 'tx')
@@ -314,6 +321,7 @@ func Test_set_completion()
   call feedkeys(":set cdpath=./\<C-A>\<C-B>\"\<CR>", 'tx')
   call assert_match(' ./samples/ ', @:)
   call assert_notmatch(' ./summarize.vim ', @:)
+  set cdpath&
 
   " Expand files and directories.
   call feedkeys(":set tags=./\<C-A>\<C-B>\"\<CR>", 'tx')
@@ -321,7 +329,50 @@ func Test_set_completion()
 
   call feedkeys(":set tags=./\\\\ dif\<C-A>\<C-B>\"\<CR>", 'tx')
   call assert_equal('"set tags=./\\ diff diffexpr diffopt', @:)
-  set tags&
+
+  " Expand files with spaces/commas in them. Make sure we delimit correctly.
+  "
+  " 'tags' allow for for spaces/commas to both act as delimiters, with actual
+  " spaces requiring double escape, and commas need a single escape.
+  " 'dictionary' is a normal comma-separated option where only commas act as
+  " delimiters, and both space/comma need one single escape.
+  " 'makeprg' is a non-comma-separated option. Commas don't need escape.
+  defer delete('Xfoo Xspace.txt')
+  defer delete('Xsp_dummy')
+  defer delete('Xbar,Xcomma.txt')
+  defer delete('Xcom_dummy')
+  call writefile([], 'Xfoo Xspace.txt')
+  call writefile([], 'Xsp_dummy')
+  call writefile([], 'Xbar,Xcomma.txt')
+  call writefile([], 'Xcom_dummy')
+
+  call feedkeys(':set tags=./Xfoo\ Xsp' .. "\<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"set tags=./Xfoo\ Xsp_dummy', @:)
+  call feedkeys(':set tags=./Xfoo\\\ Xsp' .. "\<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"set tags=./Xfoo\\\ Xspace.txt', @:)
+  call feedkeys(':set dictionary=./Xfoo\ Xsp' .. "\<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"set dictionary=./Xfoo\ Xspace.txt', @:)
+
+  call feedkeys(':set dictionary=./Xbar,Xcom' .. "\<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"set dictionary=./Xbar,Xcom_dummy', @:)
+  if has('win32')
+    " In Windows, '\,' is literal, see `:help filename-backslash`, so this
+    " means we treat it as one file name.
+    call feedkeys(':set dictionary=Xbar\,Xcom' .. "\<C-A>\<C-B>\"\<CR>", 'tx')
+    call assert_equal('"set dictionary=Xbar\,Xcomma.txt', @:)
+  else
+    " In other platforms, '\,' simply escape to ',', and indicate a delimiter
+    " to split into a separate file name. You need '\\,' to escape the comma
+    " as part of the file name.
+    call feedkeys(':set dictionary=Xbar\,Xcom' .. "\<C-A>\<C-B>\"\<CR>", 'tx')
+    call assert_equal('"set dictionary=Xbar\,Xcom_dummy', @:)
+
+    call feedkeys(':set dictionary=Xbar\\,Xcom' .. "\<C-A>\<C-B>\"\<CR>", 'tx')
+    call assert_equal('"set dictionary=Xbar\\,Xcomma.txt', @:)
+  endif
+  call feedkeys(":set makeprg=./Xbar,Xcom\<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"set makeprg=./Xbar,Xcomma.txt', @:)
+  set tags& dictionary& makeprg&
 
   " Expanding the option names
   call feedkeys(":set \<Tab>\<C-B>\"\<CR>", 'xt')
@@ -360,14 +411,20 @@ func Test_set_completion()
   call assert_equal("\"set invtabstop=", @:)
 
   " Expand options for 'spellsuggest'
-  call feedkeys(":set spellsuggest=best,file:xyz\<Tab>\<C-B>\"\<CR>", 'xt')
-  call assert_equal("\"set spellsuggest=best,file:xyz", @:)
+  call feedkeys(":set spellsuggest=file:test_options.v\<Tab>\<C-B>\"\<CR>", 'xt')
+  call assert_equal("\"set spellsuggest=file:test_options.vim", @:)
+  call feedkeys(":set spellsuggest=best,file:test_options.v\<Tab>\<C-B>\"\<CR>", 'xt')
+  call assert_equal("\"set spellsuggest=best,file:test_options.vim", @:)
 
-  " Expand value for 'key'
-  set key=abcd
-  call feedkeys(":set key=\<Tab>\<C-B>\"\<CR>", 'xt')
-  call assert_equal('"set key=*****', @:)
-  set key=
+  " Expanding value for 'key' is disallowed
+  if exists('+key')
+    set key=abcd
+    call feedkeys(":set key=\<Tab>\<C-B>\"\<CR>", 'xt')
+    call assert_equal('"set key=', @:)
+    call feedkeys(":set key-=\<Tab>\<C-B>\"\<CR>", 'xt')
+    call assert_equal('"set key-=', @:)
+    set key=
+  endif
 
   " Expand values for 'filetype'
   call feedkeys(":set filetype=sshdconfi\<Tab>\<C-B>\"\<CR>", 'xt')
@@ -380,6 +437,305 @@ func Test_set_completion()
   call assert_equal('"set syntax=sshdconfig', @:)
   call feedkeys(":set syntax=a\<C-A>\<C-B>\"\<CR>", 'xt')
   call assert_equal('"set syntax=' .. getcompletion('a*', 'syntax')->join(), @:)
+
+  if has('keymap')
+    " Expand values for 'keymap'
+    call feedkeys(":set keymap=acc\<Tab>\<C-B>\"\<CR>", 'xt')
+    call assert_equal('"set keymap=accents', @:)
+    call feedkeys(":set keymap=a\<C-A>\<C-B>\"\<CR>", 'xt')
+    call assert_equal('"set keymap=' .. getcompletion('a*', 'keymap')->join(), @:)
+  endif
+endfunc
+
+" Test handling of expanding individual string option values
+func Test_set_completion_string_values()
+  "
+  " Test basic enum string options that have well-defined enum names
+  "
+
+  call assert_equal(['lastline', 'truncate', 'uhex'], getcompletion('set display=', 'cmdline'))
+  call assert_equal(['truncate'], getcompletion('set display=t', 'cmdline'))
+  call assert_equal(['uhex'], getcompletion('set display=*ex*', 'cmdline'))
+
+  " Test that if a value is set, it will populate the results, but only if
+  " typed value is empty.
+  set display=uhex,lastline
+  call assert_equal(['uhex,lastline', 'lastline', 'truncate', 'uhex'], getcompletion('set display=', 'cmdline'))
+  call assert_equal(['uhex'], getcompletion('set display=u', 'cmdline'))
+  " If the set value is part of the enum list, it will show as the first
+  " result with no duplicate.
+  set display=uhex
+  call assert_equal(['uhex', 'lastline', 'truncate'], getcompletion('set display=', 'cmdline'))
+  " If empty value, will just show the normal list without an empty item
+  set display=
+  call assert_equal(['lastline', 'truncate', 'uhex'], getcompletion('set display=', 'cmdline'))
+  " Test escaping of the values
+  call assert_equal('vert:\|,fold:-,eob:~,lastline:@', getcompletion('set fillchars=', 'cmdline')[0])
+
+  " Test comma-separated lists will expand after a comma.
+  call assert_equal(['uhex'], getcompletion('set display=truncate,*ex*', 'cmdline'))
+  " Also test the positioning of the expansion is correct
+  call feedkeys(":set display=truncate,l\<Tab>\<C-B>\"\<CR>", 'xt')
+  call assert_equal('"set display=truncate,lastline', @:)
+  set display&
+
+  " Test single-value options will not expand after a comma
+  call assert_equal([], getcompletion('set ambw=single,', 'cmdline'))
+
+  " Test the other simple options to make sure they have basic auto-complete,
+  " but don't exhaustively validate their results.
+  call assert_equal('single', getcompletion('set ambw=', 'cmdline')[0])
+  call assert_match('light\|dark', getcompletion('set bg=', 'cmdline')[1])
+  call assert_equal('indent,eol,start', getcompletion('set backspace=', 'cmdline')[0])
+  call assert_equal('yes', getcompletion('set backupcopy=', 'cmdline')[1])
+  call assert_equal('backspace', getcompletion('set belloff=', 'cmdline')[1])
+  call assert_equal('min:', getcompletion('set briopt=', 'cmdline')[1])
+  if exists('+browsedir')
+    call assert_equal('current', getcompletion('set browsedir=', 'cmdline')[1])
+  endif
+  call assert_equal('unload', getcompletion('set bufhidden=', 'cmdline')[1])
+  call assert_equal('nowrite', getcompletion('set buftype=', 'cmdline')[1])
+  call assert_equal('internal', getcompletion('set casemap=', 'cmdline')[1])
+  if exists('+clipboard')
+    call assert_match('unnamed', getcompletion('set clipboard=', 'cmdline')[1])
+  endif
+  call assert_equal('.', getcompletion('set complete=', 'cmdline')[1])
+  call assert_equal('menu', getcompletion('set completeopt=', 'cmdline')[1])
+  if exists('+completeslash')
+    call assert_equal('backslash', getcompletion('set completeslash=', 'cmdline')[1])
+  endif
+  if exists('+cryptmethod')
+    call assert_equal('zip', getcompletion('set cryptmethod=', 'cmdline')[1])
+  endif
+  if exists('+cursorlineopt')
+    call assert_equal('line', getcompletion('set cursorlineopt=', 'cmdline')[1])
+  endif
+  call assert_equal('throw', getcompletion('set debug=', 'cmdline')[1])
+  call assert_equal('ver', getcompletion('set eadirection=', 'cmdline')[1])
+  call assert_equal('mac', getcompletion('set fileformat=', 'cmdline')[2])
+  if exists('+foldclose')
+    call assert_equal('all', getcompletion('set foldclose=', 'cmdline')[0])
+  endif
+  if exists('+foldmethod')
+    call assert_equal('expr', getcompletion('set foldmethod=', 'cmdline')[1])
+  endif
+  if exists('+foldopen')
+    call assert_equal('all', getcompletion('set foldopen=', 'cmdline')[1])
+  endif
+  call assert_equal('stack', getcompletion('set jumpoptions=', 'cmdline')[0])
+  call assert_equal('stopsel', getcompletion('set keymodel=', 'cmdline')[1])
+  call assert_equal('expr:1', getcompletion('set lispoptions=', 'cmdline')[1])
+  call assert_match('popup', getcompletion('set mousemodel=', 'cmdline')[2])
+  call assert_equal('bin', getcompletion('set nrformats=', 'cmdline')[1])
+  if exists('+rightleftcmd')
+    call assert_equal('search', getcompletion('set rightleftcmd=', 'cmdline')[0])
+  endif
+  call assert_equal('ver', getcompletion('set scrollopt=', 'cmdline')[1])
+  call assert_equal('exclusive', getcompletion('set selection=', 'cmdline')[1])
+  call assert_equal('key', getcompletion('set selectmode=', 'cmdline')[1])
+  if exists('+ssop')
+    call assert_equal('buffers', getcompletion('set ssop=', 'cmdline')[1])
+  endif
+  call assert_equal('statusline', getcompletion('set showcmdloc=', 'cmdline')[1])
+  if exists('+signcolumn')
+    call assert_equal('yes', getcompletion('set signcolumn=', 'cmdline')[1])
+  endif
+  if exists('+spelloptions')
+    call assert_equal('camel', getcompletion('set spelloptions=', 'cmdline')[0])
+  endif
+  if exists('+spellsuggest')
+    call assert_equal('best', getcompletion('set spellsuggest+=', 'cmdline')[0])
+  endif
+  call assert_equal('screen', getcompletion('set splitkeep=', 'cmdline')[1])
+  call assert_equal('sync', getcompletion('set swapsync=', 'cmdline')[1])
+  call assert_equal('usetab', getcompletion('set switchbuf=', 'cmdline')[1])
+  call assert_equal('ignore', getcompletion('set tagcase=', 'cmdline')[1])
+  if exists('+tabclose')
+    call assert_equal('left uselast', join(sort(getcompletion('set tabclose=', 'cmdline'))), ' ')
+  endif
+  if exists('+termwintype')
+    call assert_equal('conpty', getcompletion('set termwintype=', 'cmdline')[1])
+  endif
+  if exists('+toolbar')
+    call assert_equal('text', getcompletion('set toolbar=', 'cmdline')[1])
+  endif
+  if exists('+tbis')
+    call assert_equal('medium', getcompletion('set tbis=', 'cmdline')[2])
+  endif
+  if exists('+ttymouse')
+    set ttymouse=
+    call assert_equal('xterm2', getcompletion('set ttymouse=', 'cmdline')[1])
+    set ttymouse&
+  endif
+  call assert_equal('insert', getcompletion('set virtualedit=', 'cmdline')[1])
+  call assert_equal('longest', getcompletion('set wildmode=', 'cmdline')[1])
+  call assert_equal('full', getcompletion('set wildmode=list,longest:', 'cmdline')[0])
+  call assert_equal('tagfile', getcompletion('set wildoptions=', 'cmdline')[1])
+  if exists('+winaltkeys')
+    call assert_equal('yes', getcompletion('set winaltkeys=', 'cmdline')[1])
+  endif
+
+  " Other string options that queries the system rather than fixed enum names
+  call assert_equal(['all', 'BufAdd'], getcompletion('set eventignore=', 'cmdline')[0:1])
+  call assert_equal(['WinLeave', 'WinResized', 'WinScrolled'], getcompletion('set eiw=', 'cmdline')[-3:-1])
+  call assert_equal('latin1', getcompletion('set fileencodings=', 'cmdline')[1])
+  call assert_equal('top', getcompletion('set printoptions=', 'cmdline')[0])
+  call assert_equal('SpecialKey', getcompletion('set wincolor=', 'cmdline')[0])
+
+  call assert_equal('eol', getcompletion('set listchars+=', 'cmdline')[0])
+  call assert_equal(['multispace', 'leadmultispace'], getcompletion('set listchars+=', 'cmdline')[-2:])
+  call assert_equal('eol', getcompletion('setl listchars+=', 'cmdline')[0])
+  call assert_equal(['multispace', 'leadmultispace'], getcompletion('setl listchars+=', 'cmdline')[-2:])
+  call assert_equal('stl', getcompletion('set fillchars+=', 'cmdline')[0])
+  call assert_equal('stl', getcompletion('setl fillchars+=', 'cmdline')[0])
+
+  "
+  " Unique string options below
+  "
+
+  " keyprotocol: only auto-complete when after ':' with known protocol types
+  call assert_equal([&keyprotocol], getcompletion('set keyprotocol=', 'cmdline'))
+  call feedkeys(":set keyprotocol+=someterm:m\<Tab>\<C-B>\"\<CR>", 'xt')
+  call assert_equal('"set keyprotocol+=someterm:mok2', @:)
+  call feedkeys(":set keyprotocol+=someterm:k\<Tab>\<C-B>\"\<CR>", 'xt')
+  call assert_equal('"set keyprotocol+=someterm:kitty', @:)
+  set keyprotocol&
+
+  " previewpopup / completepopup
+  call assert_equal('height:', getcompletion('set previewpopup=', 'cmdline')[0])
+  call assert_equal('EndOfBuffer', getcompletion('set previewpopup=highlight:End*Buffer', 'cmdline')[0])
+  call feedkeys(":set previewpopup+=border:\<Tab>\<C-B>\"\<CR>", 'xt')
+  call assert_equal('"set previewpopup+=border:on', @:)
+  call feedkeys(":set completepopup=height:10,align:\<Tab>\<C-B>\"\<CR>", 'xt')
+  call assert_equal('"set completepopup=height:10,align:item', @:)
+  call assert_equal([], getcompletion('set completepopup=bogusname:', 'cmdline'))
+  set previewpopup& completepopup&
+
+  " diffopt: special handling of algorithm:<alg_list>
+  call assert_equal('filler', getcompletion('set diffopt+=', 'cmdline')[0])
+  call assert_equal([], getcompletion('set diffopt+=iblank,foldcolumn:', 'cmdline'))
+  call assert_equal('patience', getcompletion('set diffopt+=iblank,algorithm:pat*', 'cmdline')[0])
+
+  " highlight: special parsing, including auto-completing highlight groups
+  " after ':'
+  call assert_equal([&hl, '8'], getcompletion('set hl=', 'cmdline')[0:1])
+  call assert_equal('8', getcompletion('set hl+=', 'cmdline')[0])
+  call assert_equal(['8:', '8b', '8i'], getcompletion('set hl+=8', 'cmdline')[0:2])
+  call assert_equal('8bi', getcompletion('set hl+=8b', 'cmdline')[0])
+  call assert_equal('NonText', getcompletion('set hl+=8:No*ext', 'cmdline')[0])
+  " If all the display modes are used up we should be suggesting nothing. Make
+  " a hl typed option with all the modes which will look like '8bi-nrsuc2d=t',
+  " and make sure nothing is suggested from that.
+  let hl_display_modes = join(
+        \ filter(map(getcompletion('set hl+=8', 'cmdline'),
+        \            {idx, val -> val[1]}),
+        \        {idx, val -> val != ':'}),
+        \ '')
+  call assert_equal([], getcompletion('set hl+=8'..hl_display_modes, 'cmdline'))
+  " Test completion in middle of the line
+  call feedkeys(":set hl=8b i\<Left>\<Left>\<Tab>\<C-B>\"\<CR>", 'xt')
+  call assert_equal("\"set hl=8bi i", @:)
+
+  " messagesopt
+  call assert_equal(['history:', 'hit-enter', 'wait:'],
+        \ getcompletion('set messagesopt+=', 'cmdline')->sort())
+
+  "
+  " Test flag lists
+  "
+
+  " Test set=. Show the original value if nothing is typed after '='.
+  " Otherwise, the list should avoid showing what's already typed.
+  set mouse=v
+  call assert_equal(['v','a','n','i','c','h','r'], getcompletion('set mouse=', 'cmdline'))
+  set mouse=nvi
+  call assert_equal(['nvi','a','n','v','i','c','h','r'], getcompletion('set mouse=', 'cmdline'))
+  call assert_equal(['a','v','i','c','r'], getcompletion('set mouse=hn', 'cmdline'))
+
+  " Test set+=. Never show original value, and it also tries to avoid listing
+  " flags that's already in the option value.
+  call assert_equal(['a','c','h','r'], getcompletion('set mouse+=', 'cmdline'))
+  call assert_equal(['a','c','r'], getcompletion('set mouse+=hn', 'cmdline'))
+  call assert_equal([], getcompletion('set mouse+=acrhn', 'cmdline'))
+
+  " Test that the position of the expansion is correct (even if there are
+  " additional values after the current cursor)
+  call feedkeys(":set mouse=hn\<Left>\<Tab>\<C-B>\"\<CR>", 'xt')
+  call assert_equal('"set mouse=han', @:)
+  set mouse&
+
+  " Test that other flag list options have auto-complete, but don't
+  " exhaustively validate their results.
+  if exists('+concealcursor')
+    call assert_equal('n', getcompletion('set cocu=', 'cmdline')[0])
+  endif
+  call assert_equal('a', getcompletion('set cpo=', 'cmdline')[1])
+  call assert_equal('t', getcompletion('set fo=', 'cmdline')[1])
+  if exists('+guioptions')
+    call assert_equal('!', getcompletion('set go=', 'cmdline')[1])
+  endif
+  call assert_equal('r', getcompletion('set shortmess=', 'cmdline')[1])
+  call assert_equal('b', getcompletion('set whichwrap=', 'cmdline')[1])
+
+  "
+  "Test set-=
+  "
+
+  " Normal single-value option just shows the existing value
+  set ambiwidth=double
+  call assert_equal(['double'], getcompletion('set ambw-=', 'cmdline'))
+  set ambiwidth&
+
+  " Works on numbers and term options as well
+  call assert_equal([string(&laststatus)], getcompletion('set laststatus-=', 'cmdline'))
+  set t_Ce=testCe
+  call assert_equal(['testCe'], getcompletion('set t_Ce-=', 'cmdline'))
+  set t_Ce&
+
+  " Comma-separated lists should present each option
+  set diffopt=context:123,,,,,iblank,iwhiteall
+  call assert_equal(['context:123', 'iblank', 'iwhiteall'], getcompletion('set diffopt-=', 'cmdline'))
+  call assert_equal(['context:123', 'iblank'], getcompletion('set diffopt-=*n*', 'cmdline'))
+  call assert_equal(['iblank', 'iwhiteall'], getcompletion('set diffopt-=i', 'cmdline'))
+  " Don't present more than one option as it doesn't make sense in set-=
+  call assert_equal([], getcompletion('set diffopt-=iblank,', 'cmdline'))
+  " Test empty option
+  set diffopt=
+  call assert_equal([], getcompletion('set diffopt-=', 'cmdline'))
+  " Test all possible values
+  call assert_equal(['filler', 'context:', 'iblank', 'icase', 'iwhite', 'iwhiteall', 'iwhiteeol', 'horizontal',
+        \ 'vertical', 'closeoff', 'hiddenoff', 'foldcolumn:', 'followwrap', 'internal', 'indent-heuristic', 'algorithm:', 'linematch:'],
+        \ getcompletion('set diffopt=', 'cmdline'))
+  set diffopt&
+
+  " Test escaping output
+  call assert_equal('vert:\|', getcompletion('set fillchars-=', 'cmdline')[0])
+
+  " Test files with commas in name are being parsed and escaped properly
+  set path=has\\\ space,file\\,with\\,comma,normal_file
+  if exists('+completeslash')
+    call assert_equal(['has\\\ space', 'file\,with\,comma', 'normal_file'], getcompletion('set path-=', 'cmdline'))
+  else
+    call assert_equal(['has\\\ space', 'file\\,with\\,comma', 'normal_file'], getcompletion('set path-=', 'cmdline'))
+  endif
+  set path&
+
+  " Flag list should present orig value, then individual flags
+  set mouse=v
+  call assert_equal(['v'], getcompletion('set mouse-=', 'cmdline'))
+  set mouse=avn
+  call assert_equal(['avn','a','v','n'], getcompletion('set mouse-=', 'cmdline'))
+  " Don't auto-complete when we have at least one flags already
+  call assert_equal([], getcompletion('set mouse-=n', 'cmdline'))
+  " Test empty option
+  set mouse=
+  call assert_equal([], getcompletion('set mouse-=', 'cmdline'))
+  set mouse&
+
+  " 'whichwrap' is an odd case where it's both flag list and comma-separated
+  set ww=b,h
+  call assert_equal(['b','h'], getcompletion('set ww-=', 'cmdline'))
+  set ww&
 endfunc
 
 func Test_set_option_errors()
@@ -407,14 +763,56 @@ func Test_set_option_errors()
   call assert_fails('set tabstop=10000', 'E474:')
   call assert_fails('let &tabstop = 10000', 'E474:')
   call assert_fails('set tabstop=5500000000', 'E474:')
+  if has('terminal')
+    call assert_fails('set termwinscroll=-1', 'E487:')
+  endif
   call assert_fails('set textwidth=-1', 'E487:')
   call assert_fails('set timeoutlen=-1', 'E487:')
   call assert_fails('set updatecount=-1', 'E487:')
   call assert_fails('set updatetime=-1', 'E487:')
   call assert_fails('set winheight=-1', 'E487:')
   call assert_fails('set tabstop!', 'E488:')
+
+  " Test for setting unknown option errors
   call assert_fails('set xxx', 'E518:')
+  call assert_fails('setlocal xxx', 'E518:')
+  call assert_fails('setglobal xxx', 'E518:')
+  call assert_fails('set xxx=', 'E518:')
+  call assert_fails('setlocal xxx=', 'E518:')
+  call assert_fails('setglobal xxx=', 'E518:')
+  call assert_fails('set xxx:', 'E518:')
+  call assert_fails('setlocal xxx:', 'E518:')
+  call assert_fails('setglobal xxx:', 'E518:')
+  call assert_fails('set xxx!', 'E518:')
+  call assert_fails('setlocal xxx!', 'E518:')
+  call assert_fails('setglobal xxx!', 'E518:')
+  call assert_fails('set xxx?', 'E518:')
+  call assert_fails('setlocal xxx?', 'E518:')
+  call assert_fails('setglobal xxx?', 'E518:')
+  call assert_fails('set xxx&', 'E518:')
+  call assert_fails('setlocal xxx&', 'E518:')
+  call assert_fails('setglobal xxx&', 'E518:')
+  call assert_fails('set xxx<', 'E518:')
+  call assert_fails('setlocal xxx<', 'E518:')
+  call assert_fails('setglobal xxx<', 'E518:')
+
+  " Test for missing-options errors.
+  call assert_fails('set autoprint?', 'E519:')
   call assert_fails('set beautify?', 'E519:')
+  call assert_fails('set flash?', 'E519:')
+  call assert_fails('set graphic?', 'E519:')
+  call assert_fails('set hardtabs?', 'E519:')
+  call assert_fails('set mesg?', 'E519:')
+  call assert_fails('set novice?', 'E519:')
+  call assert_fails('set open?', 'E519:')
+  call assert_fails('set optimize?', 'E519:')
+  call assert_fails('set redraw?', 'E519:')
+  call assert_fails('set slowopen?', 'E519:')
+  call assert_fails('set sourceany?', 'E519:')
+  call assert_fails('set w300?', 'E519:')
+  call assert_fails('set w1200?', 'E519:')
+  call assert_fails('set w9600?', 'E519:')
+
   call assert_fails('set undolevels=x', 'E521:')
   call assert_fails('set tabstop=', 'E521:')
   call assert_fails('set comments=-', 'E524:')
@@ -426,12 +824,16 @@ func Test_set_option_errors()
   call assert_fails('set rulerformat=%-', 'E539:')
   call assert_fails('set rulerformat=%(', 'E542:')
   call assert_fails('set rulerformat=%15(%%', 'E542:')
+
+  " Test for 'statusline' errors
   call assert_fails('set statusline=%$', 'E539:')
   call assert_fails('set statusline=%{', 'E540:')
   call assert_fails('set statusline=%{%', 'E540:')
   call assert_fails('set statusline=%{%}', 'E539:')
   call assert_fails('set statusline=%(', 'E542:')
   call assert_fails('set statusline=%)', 'E542:')
+
+  " Test for 'tabline' errors
   call assert_fails('set tabline=%$', 'E539:')
   call assert_fails('set tabline=%{', 'E540:')
   call assert_fails('set tabline=%{%', 'E540:')
@@ -448,6 +850,7 @@ func Test_set_option_errors()
     call assert_fails('set guicursor=r-cr:horx', 'E548:')
     call assert_fails('set guicursor=r-cr:hor0', 'E549:')
   endif
+
   if has('mouseshape')
     call assert_fails('se mouseshape=i-r:x', 'E547:')
   endif
@@ -461,15 +864,19 @@ func Test_set_option_errors()
   call assert_equal('.bak', &backupext)
   set backupext& patchmode&
 
+  " 'winheight' cannot be smaller than 'winminheight'
   call assert_fails('set winminheight=10 winheight=9', 'E591:')
   set winminheight& winheight&
   set winheight=10 winminheight=10
   call assert_fails('set winheight=9', 'E591:')
   set winminheight& winheight&
+
+  " 'winwidth' cannot be smaller than 'winminwidth'
   call assert_fails('set winminwidth=10 winwidth=9', 'E592:')
   set winminwidth& winwidth&
   call assert_fails('set winwidth=9 winminwidth=10', 'E592:')
   set winwidth& winminwidth&
+
   call assert_fails("set showbreak=\x01", 'E595:')
   call assert_fails('set t_foo=', 'E846:')
   call assert_fails('set tabstop??', 'E488:')
@@ -489,18 +896,23 @@ func Test_set_option_errors()
   call assert_fails('set sessionoptions=curdir,sesdir', 'E474:')
   call assert_fails('set foldmarker={{{,', 'E474:')
   call assert_fails('set sessionoptions=sesdir,curdir', 'E474:')
+
+  " 'ambiwidth' conflict 'listchars'
   setlocal listchars=trail:·
   call assert_fails('set ambiwidth=double', 'E834:')
   setlocal listchars=trail:-
   setglobal listchars=trail:·
   call assert_fails('set ambiwidth=double', 'E834:')
   set listchars&
+
+  " 'ambiwidth' conflict 'fillchars'
   setlocal fillchars=stl:·
   call assert_fails('set ambiwidth=double', 'E835:')
   setlocal fillchars=stl:-
   setglobal fillchars=stl:·
   call assert_fails('set ambiwidth=double', 'E835:')
   set fillchars&
+
   call assert_fails('set fileencoding=latin1,utf-8', 'E474:')
   set nomodifiable
   call assert_fails('set fileencoding=latin1', 'E21:')
@@ -508,6 +920,8 @@ func Test_set_option_errors()
   call assert_fails('set t_#-&', 'E522:')
   call assert_fails('let &formatoptions = "?"', 'E539:')
   call assert_fails('call setbufvar("", "&formatoptions", "?")', 'E539:')
+
+  " Should raises only one error if passing a wrong variable type.
   call assert_fails('call setwinvar(0, "&scrolloff", [])', ['E745:', 'E745:'])
   call assert_fails('call setwinvar(0, "&list", [])', ['E745:', 'E745:'])
   call assert_fails('call setwinvar(0, "&listchars", [])', ['E730:', 'E730:'])
@@ -617,6 +1031,7 @@ func Test_set_ttytype()
   endif
 endfunc
 
+" Test for :set all
 func Test_set_all()
   set tw=75
   set iskeyword=a-z,A-Z
@@ -628,19 +1043,14 @@ func Test_set_all()
   set tw& iskeyword& splitbelow&
 endfunc
 
-func Test_set_one_column()
+" Test for :set! all
+func Test_set_all_one_column()
   let out_mult = execute('set all')->split("\n")
   let out_one = execute('set! all')->split("\n")
   call assert_true(len(out_mult) < len(out_one))
-endfunc
-
-func Test_set_values()
-  " opt_test.vim is generated from ../optiondefs.h using gen_opt_test.vim
-  if filereadable('opt_test.vim')
-    source opt_test.vim
-  else
-    throw 'Skipped: opt_test.vim does not exist'
-  endif
+  call assert_equal(out_one[0], '--- Options ---')
+  let options = out_one[1:]->mapnew({_, line -> line[2:]})
+  call assert_equal(sort(copy(options)), options)
 endfunc
 
 func Test_renderoptions()
@@ -950,6 +1360,44 @@ func Test_shortmess_F2()
   call assert_fails('call test_getvalue("abc")', 'E475:')
 endfunc
 
+func Test_shortmess_F3()
+  call writefile(['foo'], 'X_dummy', 'D')
+
+  set hidden
+  set autoread
+  e X_dummy
+  e Xotherfile
+  call assert_equal(['foo'], getbufline('X_dummy', 1, '$'))
+  set shortmess+=F
+  echo ''
+
+  if has('nanotime')
+    sleep 10m
+  else
+    sleep 2
+  endif
+  call writefile(['bar'], 'X_dummy')
+  bprev
+  call assert_equal('', Screenline(&lines))
+  call assert_equal(['bar'], getbufline('X_dummy', 1, '$'))
+
+  if has('nanotime')
+    sleep 10m
+  else
+    sleep 2
+  endif
+  call writefile(['baz'], 'X_dummy')
+  checktime
+  call assert_equal('', Screenline(&lines))
+  call assert_equal(['baz'], getbufline('X_dummy', 1, '$'))
+
+  set shortmess&
+  set autoread&
+  set hidden&
+  bwipe X_dummy
+  bwipe Xotherfile
+endfunc
+
 func Test_local_scrolloff()
   set so=5
   set siso=7
@@ -1026,7 +1474,8 @@ func Test_write()
   set nowrite
   call assert_fails('write Xwrfile', 'E142:')
   set write
-  close!
+  " close swapfile
+  bw!
 endfunc
 
 " Test for 'buftype' option
@@ -1132,40 +1581,79 @@ endfunc
 
 " Test for changing options in a sandbox
 func Test_opt_sandbox()
-  for opt in ['backupdir', 'cdpath', 'exrc']
+  for opt in ['backupdir', 'cdpath', 'exrc', 'findfunc']
     call assert_fails('sandbox set ' .. opt .. '?', 'E48:')
     call assert_fails('sandbox let &' .. opt .. ' = 1', 'E48:')
   endfor
   call assert_fails('sandbox let &modelineexpr = 1', 'E48:')
 endfunc
 
-" Test for setting an option with local value to global value
-func Test_opt_local_to_global()
+" Test for setting string global-local option value
+func Test_set_string_global_local_option()
   setglobal equalprg=gprg
   setlocal equalprg=lprg
   call assert_equal('gprg', &g:equalprg)
   call assert_equal('lprg', &l:equalprg)
   call assert_equal('lprg', &equalprg)
+
+  " :set {option}< removes the local value, so that the global value will be used.
   set equalprg<
   call assert_equal('', &l:equalprg)
   call assert_equal('gprg', &equalprg)
+
+  " :setlocal {option}< set the effective value of {option} to its global value.
   setglobal equalprg=gnewprg
   setlocal equalprg=lnewprg
   setlocal equalprg<
   call assert_equal('gnewprg', &l:equalprg)
   call assert_equal('gnewprg', &equalprg)
-  set equalprg&
 
-  " Test for setting the global/local value of a boolean option
+  set equalprg&
+endfunc
+
+" Test for setting number global-local option value
+func Test_set_number_global_local_option()
+  setglobal scrolloff=10
+  setlocal scrolloff=12
+  call assert_equal(10, &g:scrolloff)
+  call assert_equal(12, &l:scrolloff)
+  call assert_equal(12, &scrolloff)
+
+  " :set {option}< set the effective value of {option} to its global value.
+  set scrolloff<
+  call assert_equal(10, &l:scrolloff)
+  call assert_equal(10, &scrolloff)
+
+  " :setlocal {option}< removes the local value, so that the global value will be used.
+  setglobal scrolloff=15
+  setlocal scrolloff=18
+  setlocal scrolloff<
+  call assert_equal(-1, &l:scrolloff)
+  call assert_equal(15, &scrolloff)
+
+  set scrolloff&
+endfunc
+
+" Test for setting boolean global-local option value
+func Test_set_boolean_global_local_option()
   setglobal autoread
   setlocal noautoread
-  call assert_false(&autoread)
+  call assert_equal(1, &g:autoread)
+  call assert_equal(0, &l:autoread)
+  call assert_equal(0, &autoread)
+
+  " :set {option}< set the effective value of {option} to its global value.
   set autoread<
-  call assert_true(&autoread)
+  call assert_equal(1, &l:autoread)
+  call assert_equal(1, &autoread)
+
+  " :setlocal {option}< removes the local value, so that the global value will be used.
   setglobal noautoread
   setlocal autoread
   setlocal autoread<
-  call assert_false(&autoread)
+  call assert_equal(-1, &l:autoread)
+  call assert_equal(0, &autoread)
+
   set autoread&
 endfunc
 
@@ -1191,30 +1679,435 @@ func Test_set_in_sandbox()
   set filetype&
 endfunc
 
-" Test for incrementing, decrementing and multiplying a number option value
-func Test_opt_num_op()
+" Test for setting string option value
+func Test_set_string_option()
+  " :set {option}=
+  set makeprg=
+  call assert_equal('', &mp)
+  set makeprg=abc
+  call assert_equal('abc', &mp)
+
+  " :set {option}:
+  set makeprg:
+  call assert_equal('', &mp)
+  set makeprg:abc
+  call assert_equal('abc', &mp)
+
+  " Let string
+  let &makeprg = ''
+  call assert_equal('', &mp)
+  let &makeprg = 'abc'
+  call assert_equal('abc', &mp)
+
+  " Let number converts to string
+  let &makeprg = 42
+  call assert_equal('42', &mp)
+
+  " Appending
+  set makeprg=abc
+  set makeprg+=def
+  call assert_equal('abcdef', &mp)
+  set makeprg+=def
+  call assert_equal('abcdefdef', &mp, ':set+= appends a value even if it already contained')
+  let &makeprg .= 'gh'
+  call assert_equal('abcdefdefgh', &mp)
+  let &makeprg ..= 'ij'
+  call assert_equal('abcdefdefghij', &mp)
+
+  " Removing
+  set makeprg=abcdefghi
+  set makeprg-=def
+  call assert_equal('abcghi', &mp)
+  set makeprg-=def
+  call assert_equal('abcghi', &mp, ':set-= does not remove a value if it is not contained')
+
+  " Prepending
+  set makeprg=abc
+  set makeprg^=def
+  call assert_equal('defabc', &mp)
+  set makeprg^=def
+  call assert_equal('defdefabc', &mp, ':set+= prepends a value even if it already contained')
+
+  set makeprg&
+endfunc
+
+" Test for setting string comma-separated list option value
+func Test_set_string_comma_list_option()
+  " :set {option}=
+  set wildignore=
+  call assert_equal('', &wildignore)
+  set wildignore=*.png
+  call assert_equal('*.png', &wildignore)
+
+  " :set {option}:
+  set wildignore:
+  call assert_equal('', &wildignore)
+  set wildignore:*.png
+  call assert_equal('*.png', &wildignore)
+
+  " Let string
+  let &wildignore = ''
+  call assert_equal('', &wildignore)
+  let &wildignore = '*.png'
+  call assert_equal('*.png', &wildignore)
+
+  " Let number converts to string
+  let &wildignore = 42
+  call assert_equal('42', &wildignore)
+
+  " Appending
+  set wildignore=*.png
+  set wildignore+=*.jpg
+  call assert_equal('*.png,*.jpg', &wildignore, ':set+= prepends a comma to append a value')
+  set wildignore+=*.jpg
+  call assert_equal('*.png,*.jpg', &wildignore, ':set+= does not append a value if it already contained')
+  set wildignore+=jpg
+  call assert_equal('*.png,*.jpg,jpg', &wildignore, ':set+= prepends a comma to append a value if it is not exactly match to item')
+  let &wildignore .= 'foo'
+  call assert_equal('*.png,*.jpg,jpgfoo', &wildignore, ':let-& .= appends a value without a comma')
+  let &wildignore ..= 'bar'
+  call assert_equal('*.png,*.jpg,jpgfoobar', &wildignore, ':let-& ..= appends a value without a comma')
+
+  " Removing
+  set wildignore=*.png,*.jpg,*.obj
+  set wildignore-=*.jpg
+  call assert_equal('*.png,*.obj', &wildignore)
+  set wildignore-=*.jpg
+  call assert_equal('*.png,*.obj', &wildignore, ':set-= does not remove a value if it is not contained')
+  set wildignore-=jpg
+  call assert_equal('*.png,*.obj', &wildignore, ':set-= does not remove a value if it is not exactly match to item')
+
+  " Prepending
+  set wildignore=*.png
+  set wildignore^=*.jpg
+  call assert_equal('*.jpg,*.png', &wildignore)
+  set wildignore^=*.jpg
+  call assert_equal('*.jpg,*.png', &wildignore, ':set+= does not prepend a value if it already contained')
+  set wildignore^=jpg
+  call assert_equal('jpg,*.jpg,*.png', &wildignore, ':set+= prepend a value if it is not exactly match to item')
+
+  set wildignore&
+endfunc
+
+" Test for setting string flags option value
+func Test_set_string_flags_option()
+  " :set {option}=
+  set formatoptions=
+  call assert_equal('', &fo)
+  set formatoptions=abc
+  call assert_equal('abc', &fo)
+
+  " :set {option}:
+  set formatoptions:
+  call assert_equal('', &fo)
+  set formatoptions:abc
+  call assert_equal('abc', &fo)
+
+  " Let string
+  let &formatoptions = ''
+  call assert_equal('', &fo)
+  let &formatoptions = 'abc'
+  call assert_equal('abc', &fo)
+
+  " Let number converts to string
+  let &formatoptions = 12
+  call assert_equal('12', &fo)
+
+  " Appending
+  set formatoptions=abc
+  set formatoptions+=pqr
+  call assert_equal('abcpqr', &fo)
+  set formatoptions+=pqr
+  call assert_equal('abcpqr', &fo, ':set+= does not append a value if it already contained')
+  let &formatoptions .= 'r'
+  call assert_equal('abcpqrr', &fo, ':let-& .= appends a value even if it already contained')
+  let &formatoptions ..= 'r'
+  call assert_equal('abcpqrrr', &fo, ':let-& ..= appends a value even if it already contained')
+
+  " Removing
+  set formatoptions=abcpqr
+  set formatoptions-=cp
+  call assert_equal('abqr', &fo)
+  set formatoptions-=cp
+  call assert_equal('abqr', &fo, ':set-= does not remove a value if it is not contained')
+  set formatoptions-=ar
+  call assert_equal('abqr', &fo, ':set-= does not remove a value if it is not exactly match')
+
+  " Prepending
+  set formatoptions=abc
+  set formatoptions^=pqr
+  call assert_equal('pqrabc', &fo)
+  set formatoptions^=qr
+  call assert_equal('pqrabc', &fo, ':set+= does not prepend a value if it already contained')
+
+  set formatoptions&
+endfunc
+
+" Test for setting number option value
+func Test_set_number_option()
+  " :set {option}=
+  set scrolljump=5
+  call assert_equal(5, &sj)
+  set scrolljump=-3
+  call assert_equal(-3, &sj)
+
+  " :set {option}:
+  set scrolljump:7
+  call assert_equal(7, &sj)
+  set scrolljump:-5
+  call assert_equal(-5, &sj)
+
+  " Set hex
+  set scrolljump=0x10
+  call assert_equal(16, &sj)
+  set scrolljump=-0x10
+  call assert_equal(-16, &sj)
+  set scrolljump=0X12
+  call assert_equal(18, &sj)
+  set scrolljump=-0X12
+  call assert_equal(-18, &sj)
+
+  " Set octal
+  set scrolljump=010
+  call assert_equal(8, &sj)
+  set scrolljump=-010
+  call assert_equal(-8, &sj)
+  set scrolljump=0o12
+  call assert_equal(10, &sj)
+  set scrolljump=-0o12
+  call assert_equal(-10, &sj)
+  set scrolljump=0O15
+  call assert_equal(13, &sj)
+  set scrolljump=-0O15
+  call assert_equal(-13, &sj)
+
+  " Let number
+  let &scrolljump = 4
+  call assert_equal(4, &sj)
+  let &scrolljump = -6
+  call assert_equal(-6, &sj)
+
+  " Let numeric string converts to number
+  let &scrolljump = '7'
+  call assert_equal(7, &sj)
+  let &scrolljump = '-9'
+  call assert_equal(-9, &sj)
+
+  " Incrementing
   set shiftwidth=4
   set sw+=2
   call assert_equal(6, &sw)
+  let &shiftwidth += 2
+  call assert_equal(8, &sw)
+
+  " Decrementing
+  set shiftwidth=6
   set sw-=2
   call assert_equal(4, &sw)
+  let &shiftwidth -= 2
+  call assert_equal(2, &sw)
+
+  " Multiplying
+  set shiftwidth=4
   set sw^=2
   call assert_equal(8, &sw)
+  let &shiftwidth *= 2
+  call assert_equal(16, &sw)
+
+  set scrolljump&
   set shiftwidth&
 endfunc
 
-" Test for setting option values using v:false and v:true
-func Test_opt_boolean()
+" Test for setting boolean option value
+func Test_set_boolean_option()
   set number&
+
+  " :set {option}
   set number
   call assert_equal(1, &nu)
+
+  " :set no{option}
   set nonu
   call assert_equal(0, &nu)
+
+  " :set {option}!
+  set number!
+  call assert_equal(1, &nu)
+  set number!
+  call assert_equal(0, &nu)
+
+  " :set inv{option}
+  set invnumber
+  call assert_equal(1, &nu)
+  set invnumber
+  call assert_equal(0, &nu)
+
+  " Let number
+  let &number = 1
+  call assert_equal(1, &nu)
+  let &number = 0
+  call assert_equal(0, &nu)
+
+  " Let numeric string converts to number
+  let &number = '1'
+  call assert_equal(1, &nu)
+  let &number = '0'
+  call assert_equal(0, &nu)
+
+  " Let v:true and v:false
   let &nu = v:true
   call assert_equal(1, &nu)
   let &nu = v:false
   call assert_equal(0, &nu)
+
   set number&
+endfunc
+
+" Test for setting string option errors
+func Test_set_string_option_errors()
+  " :set no{option}
+  call assert_fails('set nomakeprg', 'E474:')
+  call assert_fails('setlocal nomakeprg', 'E474:')
+  call assert_fails('setglobal nomakeprg', 'E474:')
+
+  " :set inv{option}
+  call assert_fails('set invmakeprg', 'E474:')
+  call assert_fails('setlocal invmakeprg', 'E474:')
+  call assert_fails('setglobal invmakeprg', 'E474:')
+
+  " :set {option}!
+  call assert_fails('set makeprg!', 'E488:')
+  call assert_fails('setlocal makeprg!', 'E488:')
+  call assert_fails('setglobal makeprg!', 'E488:')
+
+  " Invalid trailing chars
+  call assert_fails('set makeprg??', 'E488:')
+  call assert_fails('setlocal makeprg??', 'E488:')
+  call assert_fails('setglobal makeprg??', 'E488:')
+  call assert_fails('set makeprg&&', 'E488:')
+  call assert_fails('setlocal makeprg&&', 'E488:')
+  call assert_fails('setglobal makeprg&&', 'E488:')
+  call assert_fails('set makeprg<<', 'E488:')
+  call assert_fails('setlocal makeprg<<', 'E488:')
+  call assert_fails('setglobal makeprg<<', 'E488:')
+  call assert_fails('set makeprg@', 'E488:')
+  call assert_fails('setlocal makeprg@', 'E488:')
+  call assert_fails('setglobal makeprg@', 'E488:')
+
+  " Invalid type
+  call assert_fails("let &makeprg = ['xxx']", 'E730:')
+endfunc
+
+" Test for setting number option errors
+func Test_set_number_option_errors()
+  " :set no{option}
+  call assert_fails('set notabstop', 'E474:')
+  call assert_fails('setlocal notabstop', 'E474:')
+  call assert_fails('setglobal notabstop', 'E474:')
+
+  " :set inv{option}
+  call assert_fails('set invtabstop', 'E474:')
+  call assert_fails('setlocal invtabstop', 'E474:')
+  call assert_fails('setglobal invtabstop', 'E474:')
+
+  " :set {option}!
+  call assert_fails('set tabstop!', 'E488:')
+  call assert_fails('setlocal tabstop!', 'E488:')
+  call assert_fails('setglobal tabstop!', 'E488:')
+
+  " Invalid trailing chars
+  call assert_fails('set tabstop??', 'E488:')
+  call assert_fails('setlocal tabstop??', 'E488:')
+  call assert_fails('setglobal tabstop??', 'E488:')
+  call assert_fails('set tabstop&&', 'E488:')
+  call assert_fails('setlocal tabstop&&', 'E488:')
+  call assert_fails('setglobal tabstop&&', 'E488:')
+  call assert_fails('set tabstop<<', 'E488:')
+  call assert_fails('setlocal tabstop<<', 'E488:')
+  call assert_fails('setglobal tabstop<<', 'E488:')
+  call assert_fails('set tabstop@', 'E488:')
+  call assert_fails('setlocal tabstop@', 'E488:')
+  call assert_fails('setglobal tabstop@', 'E488:')
+
+  " Not a number
+  call assert_fails('set tabstop=', 'E521:')
+  call assert_fails('setlocal tabstop=', 'E521:')
+  call assert_fails('setglobal tabstop=', 'E521:')
+  call assert_fails('set tabstop=x', 'E521:')
+  call assert_fails('setlocal tabstop=x', 'E521:')
+  call assert_fails('setglobal tabstop=x', 'E521:')
+  call assert_fails('set tabstop=1x', 'E521:')
+  call assert_fails('setlocal tabstop=1x', 'E521:')
+  call assert_fails('setglobal tabstop=1x', 'E521:')
+  call assert_fails('set tabstop=-x', 'E521:')
+  call assert_fails('setlocal tabstop=-x', 'E521:')
+  call assert_fails('setglobal tabstop=-x', 'E521:')
+  call assert_fails('set tabstop=0x', 'E521:')
+  call assert_fails('setlocal tabstop=0x', 'E521:')
+  call assert_fails('setglobal tabstop=0x', 'E521:')
+  call assert_fails('set tabstop=0o', 'E521:')
+  call assert_fails('setlocal tabstop=0o', 'E521:')
+  call assert_fails('setglobal tabstop=0o', 'E521:')
+  call assert_fails("let &tabstop = 'x'", 'E521:')
+  call assert_fails("let &g:tabstop = 'x'", 'E521:')
+  call assert_fails("let &l:tabstop = 'x'", 'E521:')
+
+  " Invalid type
+  call assert_fails("let &tabstop = 'xxx'", 'E521:')
+endfunc
+
+" Test for setting boolean option errors
+func Test_set_boolean_option_errors()
+  " :set {option}=
+  call assert_fails('set number=', 'E474:')
+  call assert_fails('setlocal number=', 'E474:')
+  call assert_fails('setglobal number=', 'E474:')
+  call assert_fails('set number=1', 'E474:')
+  call assert_fails('setlocal number=1', 'E474:')
+  call assert_fails('setglobal number=1', 'E474:')
+
+  " :set {option}:
+  call assert_fails('set number:', 'E474:')
+  call assert_fails('setlocal number:', 'E474:')
+  call assert_fails('setglobal number:', 'E474:')
+  call assert_fails('set number:1', 'E474:')
+  call assert_fails('setlocal number:1', 'E474:')
+  call assert_fails('setglobal number:1', 'E474:')
+
+  " :set {option}+=
+  call assert_fails('set number+=1', 'E474:')
+  call assert_fails('setlocal number+=1', 'E474:')
+  call assert_fails('setglobal number+=1', 'E474:')
+
+  " :set {option}^=
+  call assert_fails('set number^=1', 'E474:')
+  call assert_fails('setlocal number^=1', 'E474:')
+  call assert_fails('setglobal number^=1', 'E474:')
+
+  " :set {option}-=
+  call assert_fails('set number-=1', 'E474:')
+  call assert_fails('setlocal number-=1', 'E474:')
+  call assert_fails('setglobal number-=1', 'E474:')
+
+  " Invalid trailing chars
+  call assert_fails('set number!!', 'E488:')
+  call assert_fails('setlocal number!!', 'E488:')
+  call assert_fails('setglobal number!!', 'E488:')
+  call assert_fails('set number??', 'E488:')
+  call assert_fails('setlocal number??', 'E488:')
+  call assert_fails('setglobal number??', 'E488:')
+  call assert_fails('set number&&', 'E488:')
+  call assert_fails('setlocal number&&', 'E488:')
+  call assert_fails('setglobal number&&', 'E488:')
+  call assert_fails('set number<<', 'E488:')
+  call assert_fails('setlocal number<<', 'E488:')
+  call assert_fails('setglobal number<<', 'E488:')
+  call assert_fails('set number@', 'E488:')
+  call assert_fails('setlocal number@', 'E488:')
+  call assert_fails('setglobal number@', 'E488:')
+
+  " Invalid type
+  call assert_fails("let &number = 'xxx'", 'E521:')
 endfunc
 
 " Test for the 'window' option
@@ -1343,7 +2236,7 @@ func Test_VIM_POSIX()
     qall
   [CODE]
   if RunVim([], after, '')
-    call assert_equal(['aAbBcCdDeEfFgHiIjJkKlLmMnoOpPqrRsStuvwWxXyZ$!%*-+<>#{|&/\.;',
+    call assert_equal(['aAbBcCdDeEfFgHiIjJkKlLmMnoOpPqrRsStuvwWxXyZz$!%*-+<>#{|&/\.;',
           \            'AS'], readfile('X_VIM_POSIX'))
   endif
 
@@ -1353,7 +2246,7 @@ func Test_VIM_POSIX()
     qall
   [CODE]
   if RunVim([], after, '')
-    call assert_equal(['aAbBcCdDeEfFgHiIjJkKlLmMnoOpPqrRsStuvwWxXyZ$!%*-+<>;',
+    call assert_equal(['aAbBcCdDeEfFgHiIjJkKlLmMnoOpPqrRsStuvwWxXyZz$!%*-+<>;',
           \            'S'], readfile('X_VIM_POSIX'))
   endif
 
@@ -1378,13 +2271,46 @@ func Test_opt_default()
 endfunc
 
 " Test for the 'cmdheight' option
-func Test_cmdheight()
+func Test_opt_cmdheight()
   %bw!
   let ht = &lines
   set cmdheight=9999
   call assert_equal(1, winheight(0))
   call assert_equal(ht - 1, &cmdheight)
   set cmdheight&
+
+  " The status line should be taken into account.
+  set laststatus=2
+  set cmdheight=9999
+  call assert_equal(ht - 2, &cmdheight)
+  set cmdheight& laststatus&
+
+  " The tabline should be taken into account only non-GUI.
+  set showtabline=2
+  set cmdheight=9999
+  if has('gui_running')
+    call assert_equal(ht - 1, &cmdheight)
+  else
+    call assert_equal(ht - 2, &cmdheight)
+  endif
+  set cmdheight& showtabline&
+
+  " The 'winminheight' should be taken into account.
+  set winheight=3 winminheight=3
+  split
+  set cmdheight=9999
+  call assert_equal(ht - 8, &cmdheight)
+  %bw!
+  set cmdheight& winminheight& winheight&
+
+  " Only the windows in the current tabpage are taken into account.
+  set winheight=3 winminheight=3 showtabline=0
+  split
+  tabnew
+  set cmdheight=9999
+  call assert_equal(ht - 3, &cmdheight)
+  %bw!
+  set cmdheight& winminheight& winheight& showtabline&
 endfunc
 
 " To specify a control character as an option value, '^' can be used
@@ -1447,7 +2373,7 @@ func Test_opt_cdhome()
   set cdhome&
 endfunc
 
-func Test_set_completion_2()
+func Test_set_completion_fuzzy()
   CheckOption termguicolors
 
   " Test default option completion
@@ -1574,6 +2500,7 @@ func Test_string_option_revert_on_failure()
         \ ['eadirection', 'hor', 'a123'],
         \ ['encoding', 'utf-8', 'a123'],
         \ ['eventignore', 'TextYankPost', 'a123'],
+        \ ['eventignorewin', 'WinScrolled', 'a123'],
         \ ['fileencoding', 'utf-8', 'a123,'],
         \ ['fileformat', 'mac', 'a123'],
         \ ['fileformats', 'mac', 'a123'],
@@ -1592,6 +2519,7 @@ func Test_string_option_revert_on_failure()
         \ ['lispoptions', 'expr:1', 'a123'],
         \ ['listchars', 'tab:->', 'tab:'],
         \ ['matchpairs', '<:>', '<:'],
+        \ ['messagesopt', 'hit-enter,history:100', 'a123'],
         \ ['mkspellmem', '100000,1000,100', '100000'],
         \ ['mouse', 'nvi', 'z'],
         \ ['mousemodel', 'extend', 'a123'],
@@ -1859,6 +2787,90 @@ func Test_binary_depending_options()
   call assert_match("^\tLast set from .*Xvimrc_bin2 line 1$", result[5])
 
   call delete('Xoutput_bin')
+endfunc
+
+func Test_set_keyprotocol()
+  CheckNotGui
+
+  let term = &term
+  set term=ansi
+  call assert_equal('', &t_TI)
+
+  " Setting 'keyprotocol' should affect terminal codes without needing to
+  " reset 'term'
+  set keyprotocol+=ansi:kitty
+  call assert_equal("\<Esc>[=1;1u", &t_TI)
+  let &term = term
+endfunc
+
+func Test_set_wrap()
+  " Unsetting 'wrap' when 'smoothscroll' is set does not result in incorrect
+  " cursor position.
+  set wrap smoothscroll scrolloff=5
+
+  call setline(1, ['', 'aaaa'->repeat(500)])
+  20 split
+  20 vsplit
+  norm 2G$
+  redraw
+  set nowrap
+  call assert_equal(2, winline())
+
+  set wrap& smoothscroll& scrolloff&
+endfunc
+
+func Test_delcombine()
+  new
+  set backspace=indent,eol,start
+
+  set delcombine
+  call setline(1, 'β̳̈:β̳̈')
+  normal! 0x
+  call assert_equal('β̈:β̳̈', getline(1))
+  exe "normal! A\<BS>"
+  call assert_equal('β̈:β̈', getline(1))
+  normal! 0x
+  call assert_equal('β:β̈', getline(1))
+  exe "normal! A\<BS>"
+  call assert_equal('β:β', getline(1))
+  normal! 0x
+  call assert_equal(':β', getline(1))
+  exe "normal! A\<BS>"
+  call assert_equal(':', getline(1))
+
+  set nodelcombine
+  call setline(1, 'β̳̈:β̳̈')
+  normal! 0x
+  call assert_equal(':β̳̈', getline(1))
+  exe "normal! A\<BS>"
+  call assert_equal(':', getline(1))
+
+  set backspace& delcombine&
+  bwipe!
+endfunc
+
+" Should not raise errors when set missing-options.
+func Test_set_missing_options()
+  set autoprint
+  set beautify
+  set flash
+  set graphic
+  set hardtabs=8
+  set mesg
+  set novice
+  set open
+  set optimize
+  set redraw
+  set slowopen
+  set sourceany
+  set w300=23
+  set w1200=23
+  set w9600=23
+endfunc
+
+func Test_default_keyprotocol()
+  " default value of keyprotocol
+  call assert_equal('kitty:kitty,foot:kitty,ghostty:kitty,wezterm:kitty,xterm:mok2', &keyprotocol)
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

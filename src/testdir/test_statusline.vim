@@ -220,6 +220,10 @@ func Test_statusline()
   wincmd j
   call assert_match('^\[Preview\],PRV\s*$', s:get_statusline())
   pclose
+  pbuffer
+  wincmd j
+  call assert_match('^\[Preview\],PRV\s*$', s:get_statusline())
+  pclose
 
   " %y: Type of file in the buffer, e.g., "[vim]". See 'filetype'.
   " %Y: Type of file in the buffer, e.g., ",VIM". See 'filetype'.
@@ -606,6 +610,27 @@ func Test_statusline_showcmd()
   call term_sendkeys(buf, ":\<CR>")
   call term_sendkeys(buf, "1234")
   call VerifyScreenDump(buf, 'Test_statusline_showcmd_5', {})
+
+  call StopVimInTerminal(buf)
+endfunc
+
+func Test_statusline_highlight_group_cleared()
+  CheckScreendump
+
+  " the laststatus option is there to prevent
+  " the code-style test from complaining about
+  " trailing whitespace
+  let lines =<< trim END
+    set fillchars=stl:\ ,stlnc:\  laststatus=2
+    split
+    hi clear StatusLine
+    hi clear StatusLineNC
+  END
+  call writefile(lines, 'XTest_statusline_stl', 'D')
+
+  let buf = RunVimInTerminal('-S XTest_statusline_stl', {})
+
+  call VerifyScreenDump(buf, 'Test_statusline_stl_1', {})
 
   call StopVimInTerminal(buf)
 endfunc

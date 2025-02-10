@@ -130,7 +130,7 @@ func Test_normal01_keymodel()
   call assert_equal([0, 1, 1, 0], getpos("'<"))
   call assert_equal([0, 3, 1, 0], getpos("'>"))
   call feedkeys("Gz\<CR>8|\<S-PageUp>y", 'xt')
-  call assert_equal([0, 2, 1, 0], getpos("'<"))
+  call assert_equal([0, 3, 1, 0], getpos("'<"))
   call assert_equal([0, 3, 8, 0], getpos("'>"))
   " Test for <S-C-Home> and <S-C-End>
   call cursor(2, 12)
@@ -380,7 +380,7 @@ func Test_normal06_formatprg()
 endfunc
 
 func Test_normal07_internalfmt()
-  " basic test for internal formmatter to textwidth of 12
+  " basic test for internal formatter to textwidth of 12
   let list=range(1,11)
   call map(list, 'v:val."    "')
   10new
@@ -402,17 +402,17 @@ func Test_normal08_fold()
   " First fold
   norm! V4jzf
   " check that folds have been created
-  call assert_equal(['50/*{{{*/', '51', '52', '53', '54/*}}}*/'], getline(50,54))
+  call assert_equal(['50/* {{{ */', '51', '52', '53', '54/* }}} */'], getline(50,54))
   " Second fold
   46
   norm! V10jzf
   " check that folds have been created
-  call assert_equal('46/*{{{*/', getline(46))
-  call assert_equal('60/*}}}*/', getline(60))
+  call assert_equal('46/* {{{ */', getline(46))
+  call assert_equal('60/* }}} */', getline(60))
   norm! k
   call assert_equal('45', getline('.'))
   norm! j
-  call assert_equal('46/*{{{*/', getline('.'))
+  call assert_equal('46/* {{{ */', getline('.'))
   norm! j
   call assert_equal('61', getline('.'))
   norm! k
@@ -421,12 +421,12 @@ func Test_normal08_fold()
   norm! k
   call assert_equal('45', getline('.'))
   norm! j
-  call assert_equal('46/*{{{*/', getline('.'))
+  call assert_equal('46/* {{{ */', getline('.'))
   norm! j
   call assert_equal('47', getline('.'))
   norm! k
   norm! zcVzO
-  call assert_equal('46/*{{{*/', getline('.'))
+  call assert_equal('46/* {{{ */', getline('.'))
   norm! j
   call assert_equal('47', getline('.'))
   norm! j
@@ -434,7 +434,7 @@ func Test_normal08_fold()
   norm! j
   call assert_equal('49', getline('.'))
   norm! j
-  call assert_equal('50/*{{{*/', getline('.'))
+  call assert_equal('50/* {{{ */', getline('.'))
   norm! j
   call assert_equal('51', getline('.'))
   " delete folds
@@ -912,12 +912,10 @@ func Test_normal14_page()
   set scrolloff=0
   100
   exe "norm! $\<c-b>"
-  call assert_equal('92', getline('.'))
   call assert_equal([0, 92, 1, 0, 1], getcurpos())
   100
   set nostartofline
   exe "norm! $\<c-b>"
-  call assert_equal('92', getline('.'))
   call assert_equal([0, 92, 2, 0, v:maxcol], getcurpos())
   " cleanup
   set startofline
@@ -1284,7 +1282,7 @@ func Test_vert_scroll_cmds()
   exe "normal \<C-U>"
   call assert_equal(36, line('.'))
   exe "normal \<C-U>"
-  call assert_equal(10, line('.'))
+  call assert_equal(1, line('.'))
   exe "normal \<C-U>"
   call assert_equal(1, line('.'))
   set scroll&
@@ -1344,6 +1342,22 @@ func Test_scroll_in_ex_mode()
   call delete('Xdone')
 endfunc
 
+func Test_scroll_and_paste_in_ex_mode()
+  " This used to crash because of moving cursor to line 0.
+  let lines =<< trim END
+      v/foo/vi|YY9PYQ
+      v/bar/vi|YY9PYQ
+      v/bar/exe line('.') == 1 ? "vi|Y\<C-B>9PYQ" : "vi|YQ"
+      call writefile(['done'], 'Xdone')
+      qa!
+  END
+  call writefile(lines, 'Xscript', 'D')
+  call assert_equal(1, RunVim([], [], '-u NONE -i NONE -n -X -Z -e -s -S Xscript'))
+  call assert_equal(['done'], readfile('Xdone'))
+
+  call delete('Xdone')
+endfunc
+
 " Test for the 'sidescroll' option
 func Test_sidescroll_opt()
   new
@@ -1385,14 +1399,14 @@ func Test_normal18_z_fold()
   " First fold
   norm! 4zF
   " check that folds have been created
-  call assert_equal(['50/*{{{*/', '51', '52', '53/*}}}*/'], getline(50,53))
+  call assert_equal(['50/* {{{ */', '51', '52', '53/* }}} */'], getline(50,53))
 
   " Test for zd
   51
   norm! 2zF
   call assert_equal(2, foldlevel('.'))
   norm! kzd
-  call assert_equal(['50', '51/*{{{*/', '52/*}}}*/', '53'], getline(50,53))
+  call assert_equal(['50', '51/* {{{ */', '52/* }}} */', '53'], getline(50,53))
   norm! j
   call assert_equal(1, foldlevel('.'))
 
@@ -1411,7 +1425,7 @@ func Test_normal18_z_fold()
   norm! 2zF
   90
   norm! 4zF
-  call assert_equal(['85/*{{{*/', '86/*{{{*/', '87/*}}}*/', '88/*}}}*/', '89', '90/*{{{*/', '91', '92', '93/*}}}*/'], getline(85,93))
+  call assert_equal(['85/* {{{ */', '86/* {{{ */', '87/* }}} */', '88/* }}} */', '89', '90/* {{{ */', '91', '92', '93/* }}} */'], getline(85,93))
   norm! zE
   call assert_equal(['85', '86', '87', '88', '89', '90', '91', '92', '93'], getline(85,93))
 
@@ -1423,9 +1437,9 @@ func Test_normal18_z_fold()
   norm! k
   call assert_equal('49', getline('.'))
   norm! j
-  call assert_equal('50/*{{{*/', getline('.'))
+  call assert_equal('50/* {{{ */', getline('.'))
   norm! j
-  call assert_equal('51/*}}}*/', getline('.'))
+  call assert_equal('51/* }}} */', getline('.'))
   norm! j
   call assert_equal('52', getline('.'))
   call assert_equal(0, &foldenable)
@@ -1435,7 +1449,7 @@ func Test_normal18_z_fold()
   norm! zN
   call assert_equal('49', getline('.'))
   norm! j
-  call assert_equal('50/*{{{*/', getline('.'))
+  call assert_equal('50/* {{{ */', getline('.'))
   norm! j
   call assert_equal('52', getline('.'))
   call assert_equal(1, &foldenable)
@@ -1456,9 +1470,9 @@ func Test_normal18_z_fold()
   norm! k
   call assert_equal('49', getline('.'))
   norm! j
-  call assert_equal('50/*{{{*/', getline('.'))
+  call assert_equal('50/* {{{ */', getline('.'))
   norm! j
-  call assert_equal('51/*}}}*/', getline('.'))
+  call assert_equal('51/* }}} */', getline('.'))
   norm! j
   call assert_equal('52', getline('.'))
   50
@@ -1466,7 +1480,7 @@ func Test_normal18_z_fold()
   norm! k
   call assert_equal('49', getline('.'))
   norm! j
-  call assert_equal('50/*{{{*/', getline('.'))
+  call assert_equal('50/* {{{ */', getline('.'))
   norm! j
   call assert_equal('52', getline('.'))
 
@@ -1475,14 +1489,14 @@ func Test_normal18_z_fold()
   norm! k
   call assert_equal('48', getline('.'))
   norm! j
-  call assert_equal('49/*{{{*/', getline('.'))
+  call assert_equal('49/* {{{ */', getline('.'))
   norm! j
   call assert_equal('55', getline('.'))
   49
   norm! za
-  call assert_equal('49/*{{{*/', getline('.'))
+  call assert_equal('49/* {{{ */', getline('.'))
   norm! j
-  call assert_equal('50/*{{{*/', getline('.'))
+  call assert_equal('50/* {{{ */', getline('.'))
   norm! j
   call assert_equal('52', getline('.'))
   set nofoldenable
@@ -1496,11 +1510,11 @@ func Test_normal18_z_fold()
   norm! 2k
   call assert_equal('48', getline('.'))
   norm! j
-  call assert_equal('49/*{{{*/', getline('.'))
+  call assert_equal('49/* {{{ */', getline('.'))
   norm! j
-  call assert_equal('50/*{{{*/', getline('.'))
+  call assert_equal('50/* {{{ */', getline('.'))
   norm! j
-  call assert_equal('51/*}}}*/', getline('.'))
+  call assert_equal('51/* }}} */', getline('.'))
   norm! j
   call assert_equal('52', getline('.'))
 
@@ -1512,11 +1526,11 @@ func Test_normal18_z_fold()
   norm! 2k
   call assert_equal('48', getline('.'))
   norm! j
-  call assert_equal('49/*{{{*/', getline('.'))
+  call assert_equal('49/* {{{ */', getline('.'))
   norm! j
-  call assert_equal('50/*{{{*/', getline('.'))
+  call assert_equal('50/* {{{ */', getline('.'))
   norm! j
-  call assert_equal('51/*}}}*/', getline('.'))
+  call assert_equal('51/* }}} */', getline('.'))
   norm! j
   call assert_equal('52', getline('.'))
 
@@ -1528,7 +1542,7 @@ func Test_normal18_z_fold()
   norm! k
   call assert_equal('48', getline('.'))
   norm! j
-  call assert_equal('49/*{{{*/', getline('.'))
+  call assert_equal('49/* {{{ */', getline('.'))
   norm! j
   call assert_equal('55', getline('.'))
 
@@ -1548,7 +1562,7 @@ func Test_normal18_z_fold()
   norm! k
   call assert_equal('48', getline('.'))
   norm! j
-  call assert_equal('49/*{{{*/', getline('.'))
+  call assert_equal('49/* {{{ */', getline('.'))
   norm! j
   call assert_equal('55', getline('.'))
   set nofoldenable
@@ -1557,7 +1571,7 @@ func Test_normal18_z_fold()
   norm! k
   call assert_equal('48', getline('.'))
   norm! j
-  call assert_equal('49/*{{{*/', getline('.'))
+  call assert_equal('49/* {{{ */', getline('.'))
   norm! j
   call assert_equal('55', getline('.'))
 
@@ -1567,7 +1581,7 @@ func Test_normal18_z_fold()
   norm! zCk
   call assert_equal('48', getline('.'))
   norm! j
-  call assert_equal('49/*{{{*/', getline('.'))
+  call assert_equal('49/* {{{ */', getline('.'))
   norm! j
   call assert_equal('55', getline('.'))
 
@@ -1578,7 +1592,7 @@ func Test_normal18_z_fold()
   norm! zx
   call assert_equal(1, &foldenable)
   norm! j
-  call assert_equal('49/*{{{*/', getline('.'))
+  call assert_equal('49/* {{{ */', getline('.'))
   norm! j
   call assert_equal('55', getline('.'))
 
@@ -1590,17 +1604,17 @@ func Test_normal18_z_fold()
   norm! 3k
   call assert_equal('48', getline('.'))
   norm! j
-  call assert_equal('49/*{{{*/', getline('.'))
+  call assert_equal('49/* {{{ */', getline('.'))
   norm! j
-  call assert_equal('50/*{{{*/', getline('.'))
+  call assert_equal('50/* {{{ */', getline('.'))
   norm! j
-  call assert_equal('51/*}}}*/', getline('.'))
+  call assert_equal('51/* }}} */', getline('.'))
   norm! j
   call assert_equal('52', getline('.'))
   norm! j
   call assert_equal('53', getline('.'))
   norm! j
-  call assert_equal('54/*}}}*/', getline('.'))
+  call assert_equal('54/* }}} */', getline('.'))
   norm! j
   call assert_equal('55', getline('.'))
 
@@ -1612,15 +1626,15 @@ func Test_normal18_z_fold()
   call assert_equal(1, &foldenable)
   call assert_equal('48', getline('.'))
   norm! j
-  call assert_equal('49/*{{{*/', getline('.'))
+  call assert_equal('49/* {{{ */', getline('.'))
   norm! j
-  call assert_equal('50/*{{{*/', getline('.'))
+  call assert_equal('50/* {{{ */', getline('.'))
   norm! j
   call assert_equal('52', getline('.'))
   norm! j
   call assert_equal('53', getline('.'))
   norm! j
-  call assert_equal('54/*}}}*/', getline('.'))
+  call assert_equal('54/* }}} */', getline('.'))
   norm! j
   call assert_equal('55', getline('.'))
 
@@ -1633,7 +1647,7 @@ func Test_normal18_z_fold()
   norm! k
   call assert_equal('48', getline('.'))
   norm! j
-  call assert_equal('49/*{{{*/', getline('.'))
+  call assert_equal('49/* {{{ */', getline('.'))
   norm! j
   call assert_equal('55', getline('.'))
 
@@ -1650,7 +1664,7 @@ func Test_normal18_z_fold()
   norm! k
   call assert_equal('48', getline('.'))
   norm! j
-  call assert_equal('49/*{{{*/', getline('.'))
+  call assert_equal('49/* {{{ */', getline('.'))
   norm! j
   call assert_equal('55', getline('.'))
 
@@ -1669,7 +1683,7 @@ func Test_normal18_z_fold()
   call assert_equal(0, &foldlevel)
   call assert_equal('48', getline('.'))
   norm! j
-  call assert_equal('49/*{{{*/', getline('.'))
+  call assert_equal('49/* {{{ */', getline('.'))
   norm! j
   call assert_equal('55', getline('.'))
 
@@ -1687,11 +1701,11 @@ func Test_normal18_z_fold()
   call assert_equal(2, &foldlevel)
   call assert_equal('48', getline('.'))
   norm! j
-  call assert_equal('49/*{{{*/', getline('.'))
+  call assert_equal('49/* {{{ */', getline('.'))
   norm! j
-  call assert_equal('50/*{{{*/', getline('.'))
+  call assert_equal('50/* {{{ */', getline('.'))
   norm! j
-  call assert_equal('51/*}}}*/', getline('.'))
+  call assert_equal('51/* }}} */', getline('.'))
   norm! j
   call assert_equal('52', getline('.'))
 
@@ -1707,24 +1721,24 @@ func Test_normal18_z_fold()
   call assert_equal(2, &foldlevel)
   call assert_equal('48', getline('.'))
   norm! j
-  call assert_equal('49/*{{{*/', getline('.'))
+  call assert_equal('49/* {{{ */', getline('.'))
   norm! j
-  call assert_equal('50/*{{{*/', getline('.'))
+  call assert_equal('50/* {{{ */', getline('.'))
   norm! j
-  call assert_equal('51/*}}}*/', getline('.'))
+  call assert_equal('51/* }}} */', getline('.'))
   norm! j
   call assert_equal('52', getline('.'))
-  call append(50, ['a /*{{{*/', 'b /*}}}*/'])
+  call append(50, ['a /* {{{ */', 'b /* }}} */'])
   48
   call assert_equal('48', getline('.'))
   norm! j
-  call assert_equal('49/*{{{*/', getline('.'))
+  call assert_equal('49/* {{{ */', getline('.'))
   norm! j
-  call assert_equal('50/*{{{*/', getline('.'))
+  call assert_equal('50/* {{{ */', getline('.'))
   norm! j
-  call assert_equal('a /*{{{*/', getline('.'))
+  call assert_equal('a /* {{{ */', getline('.'))
   norm! j
-  call assert_equal('51/*}}}*/', getline('.'))
+  call assert_equal('51/* }}} */', getline('.'))
   norm! j
   call assert_equal('52', getline('.'))
   48
@@ -1733,15 +1747,15 @@ func Test_normal18_z_fold()
   call assert_equal(3, &foldlevel)
   call assert_equal('48', getline('.'))
   norm! j
-  call assert_equal('49/*{{{*/', getline('.'))
+  call assert_equal('49/* {{{ */', getline('.'))
   norm! j
-  call assert_equal('50/*{{{*/', getline('.'))
+  call assert_equal('50/* {{{ */', getline('.'))
   norm! j
-  call assert_equal('a /*{{{*/', getline('.'))
+  call assert_equal('a /* {{{ */', getline('.'))
   norm! j
-  call assert_equal('b /*}}}*/', getline('.'))
+  call assert_equal('b /* }}} */', getline('.'))
   norm! j
-  call assert_equal('51/*}}}*/', getline('.'))
+  call assert_equal('51/* }}} */', getline('.'))
   norm! j
   call assert_equal('52', getline('.'))
 
@@ -2235,7 +2249,7 @@ func Test_normal29_brace()
   [DATA]
   call assert_equal(expected, getline(1, '$'))
 
-  " Test with { in cpooptions
+  " Test with { in cpoptions
   %d
   call append(0, text)
   set cpo+={
@@ -2347,22 +2361,30 @@ func Test_normal30_changecase()
   norm! 1ggVu
   call assert_equal('this is a simple test: äüöß', getline('.'))
   norm! VU
-  call assert_equal('THIS IS A SIMPLE TEST: ÄÜÖSS', getline('.'))
+  call assert_equal('THIS IS A SIMPLE TEST: ÄÜÖẞ', getline('.'))
   norm! guu
-  call assert_equal('this is a simple test: äüöss', getline('.'))
+  call assert_equal('this is a simple test: äüöß', getline('.'))
   norm! gUgU
-  call assert_equal('THIS IS A SIMPLE TEST: ÄÜÖSS', getline('.'))
+  call assert_equal('THIS IS A SIMPLE TEST: ÄÜÖẞ', getline('.'))
   norm! gugu
-  call assert_equal('this is a simple test: äüöss', getline('.'))
+  call assert_equal('this is a simple test: äüöß', getline('.'))
   norm! gUU
-  call assert_equal('THIS IS A SIMPLE TEST: ÄÜÖSS', getline('.'))
+  call assert_equal('THIS IS A SIMPLE TEST: ÄÜÖẞ', getline('.'))
   norm! 010~
-  call assert_equal('this is a SIMPLE TEST: ÄÜÖSS', getline('.'))
+  call assert_equal('this is a SIMPLE TEST: ÄÜÖẞ', getline('.'))
   norm! V~
-  call assert_equal('THIS IS A simple test: äüöss', getline('.'))
+  call assert_equal('THIS IS A simple test: äüöß', getline('.'))
   call assert_beeps('norm! c~')
   %d
   call assert_beeps('norm! ~')
+
+  " Test with multiple lines
+  call setline(1, ['AA', 'BBBB', 'CCCCCC', 'DDDDDDDD'])
+  norm! ggguG
+  call assert_equal(['aa', 'bbbb', 'cccccc', 'dddddddd'], getline(1, '$'))
+  norm! GgUgg
+  call assert_equal(['AA', 'BBBB', 'CCCCCC', 'DDDDDDDD'], getline(1, '$'))
+  %d
 
   " Test for changing case across lines using 'whichwrap'
   call setline(1, ['aaaaaa', 'aaaaaa'])
@@ -2582,7 +2604,7 @@ func Test_normal33_g_cmd2()
   exe "norm! G0\<c-v>4k4ly"
   exe "norm! gvood"
   call assert_equal(['', 'abfgh', 'abfgh', 'abfgh', 'fgh', 'fgh', 'fgh', 'fgh', 'fgh'], getline(1,'$'))
-  " gv cannot be used  in operator pending mode
+  " gv cannot be used in operator pending mode
   call assert_beeps('normal! cgv')
   " gv should beep without a previously selected visual area
   new
@@ -3158,7 +3180,7 @@ func Test_normal50_commandline()
   CheckFeature cmdline_hist
 
   func! DoTimerWork(id)
-    call assert_equal('[Command Line]', bufname(''))
+    call assert_equal(1, getbufinfo('')[0].command)
 
     " should fail, with E11, but does fail with E23?
     "call feedkeys("\<c-^>", 'tm')
@@ -3807,8 +3829,8 @@ func Test_normal_vert_scroll_longline()
   call assert_equal(11, line('.'))
   call assert_equal(1, winline())
   exe "normal \<C-B>"
-  call assert_equal(10, line('.'))
-  call assert_equal(3, winline())
+  call assert_equal(11, line('.'))
+  call assert_equal(5, winline())
   exe "normal \<C-B>\<C-B>"
   call assert_equal(5, line('.'))
   call assert_equal(5, winline())
@@ -3942,8 +3964,7 @@ func Test_mouse_shape_after_failed_change()
   END
   call writefile(lines, 'Xmouseshape.vim', 'D')
   call RunVim([], [], "-g -S Xmouseshape.vim")
-  sleep 300m
-  call assert_equal(['busy', 'arrow'], readfile('Xmouseshapes'))
+  call WaitForAssert({-> assert_equal(['busy', 'arrow'], readfile('Xmouseshapes'))}, 300)
 
   call delete('Xmouseshapes')
 endfunc
@@ -3974,8 +3995,7 @@ func Test_mouse_shape_after_cancelling_gr()
   END
   call writefile(lines, 'Xmouseshape.vim', 'D')
   call RunVim([], [], "-g -S Xmouseshape.vim")
-  sleep 300m
-  call assert_equal(['beam', 'arrow'], readfile('Xmouseshapes'))
+  call WaitForAssert({-> assert_equal(['beam', 'arrow'], readfile('Xmouseshapes'))}, 300)
 
   call delete('Xmouseshapes')
 endfunc
@@ -4104,6 +4124,39 @@ func Test_normal_click_on_double_width_char()
   let &mouse = save_mouse
 endfunc
 
+func Test_normal_click_on_empty_line()
+  let save_mouse = &mouse
+  set mouse=a
+  botright new
+  call setline(1, ['', '', ''])
+  let row = win_screenpos(0)[0] + 2
+  20vsplit
+  redraw
+
+  call test_setmouse(row, 1)
+  call feedkeys("\<LeftMouse>", 'xt')
+  call assert_equal([0, 3, 1, 0, 1], getcurpos())
+  call test_setmouse(row, 2)
+  call feedkeys("\<LeftMouse>", 'xt')
+  call assert_equal([0, 3, 1, 0, 2], getcurpos())
+  call test_setmouse(row, 10)
+  call feedkeys("\<LeftMouse>", 'xt')
+  call assert_equal([0, 3, 1, 0, 10], getcurpos())
+
+  call test_setmouse(row, 21 + 1)
+  call feedkeys("\<LeftMouse>", 'xt')
+  call assert_equal([0, 3, 1, 0, 1], getcurpos())
+  call test_setmouse(row, 21 + 2)
+  call feedkeys("\<LeftMouse>", 'xt')
+  call assert_equal([0, 3, 1, 0, 2], getcurpos())
+  call test_setmouse(row, 21 + 10)
+  call feedkeys("\<LeftMouse>", 'xt')
+  call assert_equal([0, 3, 1, 0, 10], getcurpos())
+
+  bwipe!
+  let &mouse = save_mouse
+endfunc
+
 func Test_normal33_g_cmd_nonblank()
   " Test that g<End> goes to the last non-blank char and g$ to the last
   " visible column
@@ -4126,4 +4179,135 @@ func Test_normal33_g_cmd_nonblank()
   bw!
 endfunc
 
-" vim: shiftwidth=2 sts=2 expandtab
+func Test_normal34_zet_large()
+  " shouldn't cause overflow
+  norm! z9765405999999999999
+endfunc
+
+" Test for { and } paragraph movements in a single line
+func Test_brace_single_line()
+  new
+  call setline(1, ['foobar one two three'])
+  1
+  norm! 0}
+
+  call assert_equal([0, 1, 20, 0], getpos('.'))
+  norm! {
+  call assert_equal([0, 1, 1, 0], getpos('.'))
+  bw!
+endfunc
+
+" Test for Ctrl-B/Ctrl-U in buffer with a single line
+func Test_single_line_scroll()
+  CheckFeature textprop
+
+  new
+  call setline(1, ['foobar one two three'])
+  let vt = 'virt_above'
+  call prop_type_add(vt, {'highlight': 'IncSearch'})
+  call prop_add(1, 0, {'type': vt, 'text': '---', 'text_align': 'above'})
+  call cursor(1, 1)
+
+  " Ctrl-B/Ctrl-U scroll up with hidden "above" virtual text.
+  set smoothscroll
+  exe "normal \<C-E>"
+  call assert_notequal(0, winsaveview().skipcol)
+  exe "normal \<C-B>"
+  call assert_equal(0, winsaveview().skipcol)
+  exe "normal \<C-E>"
+  call assert_notequal(0, winsaveview().skipcol)
+  exe "normal \<C-U>"
+  call assert_equal(0, winsaveview().skipcol)
+
+  set smoothscroll&
+  bw!
+  call prop_type_delete(vt)
+endfunc
+
+" Test for zb in buffer with a single line and filler lines
+func Test_single_line_filler_zb()
+  call setline(1, ['', 'foobar one two three'])
+  diffthis
+  new
+  call setline(1, ['foobar one two three'])
+  diffthis
+
+  " zb scrolls to reveal filler lines at the start of the buffer.
+  exe "normal \<C-E>zb"
+  call assert_equal(1, winsaveview().topfill)
+
+  bw!
+endfunc
+
+" Test for Ctrl-U not getting stuck at end of buffer with 'scrolloff'.
+func Test_halfpage_scrolloff_eob()
+  set scrolloff=5
+
+  call setline(1, range(1, 100))
+  exe "norm! Gzz\<C-U>zz"
+  call assert_notequal(100, line('.'))
+
+  set scrolloff&
+  bwipe!
+endfunc
+
+" Test for Ctrl-U/D moving the cursor at the buffer boundaries.
+func Test_halfpage_cursor_startend()
+  call setline(1, range(1, 100))
+  exe "norm! jztj\<C-U>"
+  call assert_equal(1, line('.'))
+  exe "norm! G\<C-Y>k\<C-D>"
+  call assert_equal(100, line('.'))
+  bwipe!
+endfunc
+
+" Test for Ctrl-F/B moving the cursor to the window boundaries.
+func Test_page_cursor_topbot()
+  10new
+  call setline(1, range(1, 100))
+  exe "norm! gg2\<C-F>"
+  call assert_equal(17, line('.'))
+  exe "norm! \<C-B>"
+  call assert_equal(18, line('.'))
+  exe "norm! \<C-B>\<C-F>"
+  call assert_equal(9, line('.'))
+  " Not when already at the start of the buffer.
+  exe "norm! ggj\<C-B>"
+  call assert_equal(2, line('.'))
+  bwipe!
+endfunc
+
+" Test for Ctrl-D with long line
+func Test_halfpage_longline()
+  10new
+  40vsplit
+  call setline(1, ['long'->repeat(1000), 'short'])
+  exe "norm! \<C-D>"
+  call assert_equal(2, line('.'))
+  bwipe!
+endfunc
+
+" Test for Ctrl-E with long line and very narrow window,
+" used to cause an infinite loop
+func Test_scroll_longline_no_loop()
+  4vnew
+  setl smoothscroll number showbreak=> scrolloff=2
+  call setline(1, repeat(['Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'], 3))
+  exe "normal! \<C-E>"
+  bwipe!
+endfunc
+
+" Test for go command
+func Test_normal_go()
+  new
+  call setline(1, ['one two three four'])
+  call cursor(1, 5)
+  norm! dvgo
+  call assert_equal('wo three four', getline(1))
+  norm! ...
+  call assert_equal('three four', getline(1))
+
+  bwipe!
+endfunc
+
+" vim: shiftwidth=2 sts=2 expandtab nofoldenable

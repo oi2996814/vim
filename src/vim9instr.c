@@ -145,7 +145,8 @@ generate_GET_OBJ_MEMBER(cctx_T *cctx, int idx, type_T *type)
     if (isn == NULL)
 	return FAIL;
 
-    isn->isn_arg.number = idx;
+    isn->isn_arg.classmember.cm_class = NULL;
+    isn->isn_arg.classmember.cm_idx = idx;
     return push_type_stack2(cctx, type, &t_any);
 }
 
@@ -190,10 +191,12 @@ generate_STORE_THIS(cctx_T *cctx, int idx)
 /*
  * If type at "offset" isn't already VAR_STRING then generate ISN_2STRING.
  * But only for simple types.
- * When "tolerant" is TRUE convert most types to string, e.g. a List.
+ * When tostring_flags has TOSTRING_TOLERANT, convert a List to a series of
+ * strings.  When tostring_flags has TOSTRING_INTERPOLATE, convert a List or a
+ * Dict to the corresponding textual representation.
  */
     int
-may_generate_2STRING(int offset, int tolerant, cctx_T *cctx)
+may_generate_2STRING(int offset, int tostring_flags, cctx_T *cctx)
 {
     isn_T	*isn;
     isntype_T	isntype = ISN_2STRING;
@@ -221,11 +224,14 @@ may_generate_2STRING(int offset, int tolerant, cctx_T *cctx)
 
 	// conversion possible when tolerant
 	case VAR_LIST:
-			 if (tolerant)
+	case VAR_DICT:
+			 if (tostring_flags & TOSTRING_TOLERANT)
 			 {
 			     isntype = ISN_2STRING_ANY;
 			     break;
 			 }
+			 if (tostring_flags & TOSTRING_INTERPOLATE)
+			     break;
 			 // FALLTHROUGH
 
 	// conversion not possible
@@ -233,12 +239,12 @@ may_generate_2STRING(int offset, int tolerant, cctx_T *cctx)
 	case VAR_BLOB:
 	case VAR_FUNC:
 	case VAR_PARTIAL:
-	case VAR_DICT:
 	case VAR_JOB:
 	case VAR_CHANNEL:
 	case VAR_INSTR:
 	case VAR_CLASS:
 	case VAR_OBJECT:
+	case VAR_TYPEALIAS:
 			 to_string_error(type->tt_type);
 			 return FAIL;
     }
@@ -247,19 +253,24 @@ may_generate_2STRING(int offset, int tolerant, cctx_T *cctx)
     if ((isn = generate_instr(cctx, isntype)) == NULL)
 	return FAIL;
     isn->isn_arg.tostring.offset = offset;
-    isn->isn_arg.tostring.tolerant = tolerant;
+    isn->isn_arg.tostring.flags = tostring_flags;
 
     return OK;
 }
 
     static int
-check_number_or_float(vartype_T type1, vartype_T type2, char_u *op)
+check_number_or_float(type_T *typ1, type_T *typ2, char_u *op)
 {
+    vartype_T	    type1 = typ1->tt_type;
+    vartype_T	    type2 = typ2->tt_type;
     if (!((type1 == VAR_NUMBER || type1 == VAR_FLOAT
 				   || type1 == VAR_ANY || type1 == VAR_UNKNOWN)
 	    && (type2 == VAR_NUMBER || type2 == VAR_FLOAT
 				 || type2 == VAR_ANY || type2 == VAR_UNKNOWN)))
     {
+	if (check_type_is_value(typ1) == FAIL
+		|| check_type_is_value(typ2) == FAIL)
+	    return FAIL;
 	if (*op == '+')
 	    emsg(_(e_wrong_argument_type_for_plus));
 	else
@@ -292,8 +303,7 @@ generate_add_instr(
 	    && type1->tt_type != VAR_UNKNOWN
 	    && type2->tt_type != VAR_ANY
 	    && type2->tt_type != VAR_UNKNOWN
-	    && check_number_or_float(
-			type1->tt_type, type2->tt_type, (char_u *)"+") == FAIL)
+	    && check_number_or_float(type1, type2, (char_u *)"+") == FAIL)
 	return FAIL;
 
     if (isn != NULL)
@@ -360,8 +370,7 @@ generate_two_op(cctx_T *cctx, char_u *op)
 
 	case '-':
 	case '*':
-	case '/': if (check_number_or_float(type1->tt_type, type2->tt_type,
-								   op) == FAIL)
+	case '/': if (check_number_or_float(type1, type2, op) == FAIL)
 		      return FAIL;
 		  if (vartype == VAR_NUMBER)
 		      isn = generate_instr_drop(cctx, ISN_OPNR, 1);
@@ -407,6 +416,19 @@ generate_two_op(cctx_T *cctx, char_u *op)
 }
 
 /*
+ * Choose correct error message for the specified type information.
+ */
+    static isntype_T
+compare_isn_not_values(typval_T *tv, type_T *type)
+{
+    if (tv != NULL)
+	(void)check_typval_is_value(tv);
+    else
+	(void)check_type_is_value(type);
+    return ISN_DROP;
+}
+
+/*
  * Get the instruction to use for comparing two values with specified types.
  * Either "tv1" and "tv2" are passed or "type1" and "type2".
  * Return ISN_DROP when failed.
@@ -423,6 +445,11 @@ get_compare_isn(
     vartype_T	vartype1 = tv1 != NULL ? tv1->v_type : type1->tt_type;
     vartype_T	vartype2 = tv2 != NULL ? tv2->v_type : type2->tt_type;
 
+    if (vartype1 == VAR_CLASS || vartype1 == VAR_TYPEALIAS)
+	return compare_isn_not_values(tv1, type1);
+    if (vartype2 == VAR_CLASS || vartype2 == VAR_TYPEALIAS)
+	return compare_isn_not_values(tv2, type2);
+
     if (vartype1 == vartype2)
     {
 	switch (vartype1)
@@ -436,7 +463,6 @@ get_compare_isn(
 	    case VAR_LIST: isntype = ISN_COMPARELIST; break;
 	    case VAR_DICT: isntype = ISN_COMPAREDICT; break;
 	    case VAR_FUNC: isntype = ISN_COMPAREFUNC; break;
-	    case VAR_CLASS: isntype = ISN_COMPARECLASS; break;
 	    case VAR_OBJECT: isntype = ISN_COMPAREOBJECT; break;
 	    default: isntype = ISN_COMPAREANY; break;
 	}
@@ -479,7 +505,7 @@ get_compare_isn(
     }
     if (!(exprtype == EXPR_IS || exprtype == EXPR_ISNOT
 		|| exprtype == EXPR_EQUAL || exprtype == EXPR_NEQUAL)
-	    && (isntype == ISN_COMPAREOBJECT || isntype == ISN_COMPARECLASS))
+	    && (isntype == ISN_COMPAREOBJECT))
     {
 	semsg(_(e_invalid_operation_for_str), vartype_name(vartype1));
 	return ISN_DROP;
@@ -1331,7 +1357,8 @@ generate_NEWLIST(cctx_T *cctx, int count, int use_null)
 
     // Get the member type and the declared member type from all the items on
     // the stack.
-    member_type = get_member_type_from_stack(count, 1, cctx);
+    if ((member_type = get_member_type_from_stack(count, 1, cctx)) == NULL)
+	return FAIL;
     type = get_list_type(member_type, cctx->ctx_type_list);
     decl_type = get_list_type(&t_any, cctx->ctx_type_list);
 
@@ -1359,7 +1386,8 @@ generate_NEWDICT(cctx_T *cctx, int count, int use_null)
 	return FAIL;
     isn->isn_arg.number = use_null ? -1 : count;
 
-    member_type = get_member_type_from_stack(count, 2, cctx);
+    if ((member_type = get_member_type_from_stack(count, 2, cctx)) == NULL)
+	return FAIL;
     type = get_dict_type(member_type, cctx->ctx_type_list);
     decl_type = get_dict_type(&t_any, cctx->ctx_type_list);
 
@@ -1374,15 +1402,18 @@ generate_NEWDICT(cctx_T *cctx, int count, int use_null)
  * Generate an ISN_FUNCREF instruction.
  * For "obj.Method" "cl" is the class of the object (can be an interface or a
  * base class) and "fi" the index of the method on that class.
- * "isnp" is set to the instruction, so that fr_dfunc_idx can be set later.
+ * "isn_idx" is set to the index of the instruction, so that fr_dfunc_idx can
+ * be set later.  The index is used instead of a pointer to the instruction
+ * because the instruction memory can be reallocated.
  */
     int
 generate_FUNCREF(
 	cctx_T	    *cctx,
 	ufunc_T	    *ufunc,
 	class_T	    *cl,
+	int	    object_method,
 	int	    fi,
-	isn_T	    **isnp)
+	int	    *isn_idx)
 {
     isn_T	    *isn;
     type_T	    *type;
@@ -1393,8 +1424,9 @@ generate_FUNCREF(
     RETURN_OK_IF_SKIP(cctx);
     if ((isn = generate_instr(cctx, ISN_FUNCREF)) == NULL)
 	return FAIL;
-    if (isnp != NULL)
-	*isnp = isn;
+    if (isn_idx != NULL)
+	// save the index of the new instruction
+	*isn_idx = cctx->ctx_instr.ga_len - 1;
 
     has_vars = get_loop_var_info(cctx, &loopinfo);
     if (ufunc->uf_def_status == UF_NOT_COMPILED || has_vars || cl != NULL)
@@ -1408,14 +1440,15 @@ generate_FUNCREF(
 	{
 	    extra->fre_class = cl;
 	    ++cl->class_refcount;
+	    extra->fre_object_method = object_method;
 	    extra->fre_method_idx = fi;
 	}
     }
     if (ufunc->uf_def_status == UF_NOT_COMPILED || cl != NULL)
-	extra->fre_func_name = vim_strsave(ufunc->uf_name);
+	extra->fre_func_name = vim_strnsave(ufunc->uf_name, ufunc->uf_namelen);
     if (ufunc->uf_def_status != UF_NOT_COMPILED && cl == NULL)
     {
-	if (isnp == NULL && ufunc->uf_def_status == UF_TO_BE_COMPILED)
+	if (isn_idx == NULL && ufunc->uf_def_status == UF_TO_BE_COMPILED)
 	    // compile the function now, we need the uf_dfunc_idx value
 	    (void)compile_def_function(ufunc, FALSE, CT_NONE, NULL);
 	isn->isn_arg.funcref.fr_dfunc_idx = ufunc->uf_dfunc_idx;
@@ -1772,6 +1805,8 @@ generate_BLOBAPPEND(cctx_T *cctx)
  * Generate an ISN_DCALL, ISN_UCALL or ISN_METHODCALL instruction.
  * When calling a method on an object, of which we know the interface only,
  * then "cl" is the interface and "mi" the method index on the interface.
+ * save is_super in the "isn->isn_arg"; it flags execution to use mfunc
+ * directly to determine ufunc.
  * Return FAIL if the number of arguments is wrong.
  */
     int
@@ -1780,8 +1815,8 @@ generate_CALL(
 	ufunc_T	    *ufunc,
 	class_T	    *cl,
 	int	    mi,
-	type_T	    *mtype,	// method type
-	int	    pushed_argcount)
+	int	    pushed_argcount,
+	int	    is_super)
 {
     isn_T	*isn;
     int		regular_args = ufunc->uf_args.ga_len;
@@ -1806,8 +1841,6 @@ generate_CALL(
     {
 	int		i;
 	compiletype_T	compile_type;
-	int		class_constructor = (mtype->tt_type == VAR_CLASS
-				    && STRNCMP(ufunc->uf_name, "new", 3) == 0);
 
 	for (i = 0; i < argcount; ++i)
 	{
@@ -1815,6 +1848,8 @@ generate_CALL(
 	    type_T *actual;
 
 	    actual = get_type_on_stack(cctx, argcount - i - 1);
+	    if (check_type_is_value(actual) == FAIL)
+		return FAIL;
 	    if (actual->tt_type == VAR_SPECIAL
 			      && i >= regular_args - ufunc->uf_def_args.ga_len)
 	    {
@@ -1826,25 +1861,6 @@ generate_CALL(
 		if (ufunc->uf_arg_types == NULL)
 		    continue;
 		expected = ufunc->uf_arg_types[i];
-
-		// When the method is a class constructor and the formal
-		// argument is an object member, the type check is performed on
-		// the object member type.
-		if (class_constructor && expected->tt_type == VAR_ANY)
-		{
-		    class_T *clp = mtype->tt_class;
-		    char_u *aname = ((char_u **)ufunc->uf_args.ga_data)[i];
-		    for (int om = 0; om < clp->class_obj_member_count; ++om)
-		    {
-			if (STRCMP(aname, clp->class_obj_members[om].ocm_name)
-									== 0)
-			{
-			    expected = clp->class_obj_members[om].ocm_type;
-			    break;
-			}
-		    }
-
-		}
 	    }
 	    else if (ufunc->uf_va_type == NULL
 					   || ufunc->uf_va_type == &t_list_any)
@@ -1885,6 +1901,7 @@ generate_CALL(
 	++cl->class_refcount;
 	isn->isn_arg.mfunc->cmf_idx = mi;
 	isn->isn_arg.mfunc->cmf_argcount = argcount;
+	isn->isn_arg.mfunc->cmf_is_super = is_super;
     }
     else if (isn->isn_type == ISN_DCALL)
     {
@@ -1895,16 +1912,22 @@ generate_CALL(
     {
 	// A user function may be deleted and redefined later, can't use the
 	// ufunc pointer, need to look it up again at runtime.
-	isn->isn_arg.ufunc.cuf_name = vim_strsave(ufunc->uf_name);
+	isn->isn_arg.ufunc.cuf_name = vim_strnsave(ufunc->uf_name, ufunc->uf_namelen);
 	isn->isn_arg.ufunc.cuf_argcount = argcount;
     }
 
     // drop the argument types
     cctx->ctx_type_stack.ga_len -= argcount;
 
-    // For an object or class method call, drop the object/class type
+    // For an object or class method call, drop the object/class type.
     if (ufunc->uf_class != NULL)
-	cctx->ctx_type_stack.ga_len--;
+    {
+	// When a class method is called without the class name prefix, then
+	// the type will not be in the stack.
+	type_T *stype = get_type_on_stack(cctx, 0);
+	if (stype->tt_type == VAR_CLASS || stype->tt_type == VAR_OBJECT)
+	    cctx->ctx_type_stack.ga_len--;
+    }
 
     // add return type
     return push_type_stack(cctx, ufunc->uf_ret_type);
@@ -1967,6 +1990,8 @@ check_func_args_from_type(
 		type_T	*actual = get_type_on_stack(cctx, -1 - offset);
 		type_T	*expected;
 
+		if (check_type_is_value(actual) == FAIL)
+		    return FAIL;
 		if (varargs && i >= type->tt_argcount - 1)
 		{
 		    expected = type->tt_args[type->tt_argcount - 1];
@@ -2049,17 +2074,14 @@ generate_PCALL(
 
 /*
  * Generate an ISN_DEFER instruction.
- * "obj_method" is one for "obj.Method()", zero otherwise.
  */
     int
-generate_DEFER(cctx_T *cctx, int var_idx, int obj_method, int argcount)
+generate_DEFER(cctx_T *cctx, int var_idx, int argcount)
 {
     isn_T *isn;
 
     RETURN_OK_IF_SKIP(cctx);
-    if ((isn = generate_instr_drop(cctx,
-		    obj_method == 0 ? ISN_DEFER : ISN_DEFEROBJ,
-		    argcount + 1)) == NULL)
+    if ((isn = generate_instr_drop(cctx, ISN_DEFER, argcount + 1)) == NULL)
 	return FAIL;
     isn->isn_arg.defer.defer_var_idx = var_idx;
     isn->isn_arg.defer.defer_argcount = argcount;
@@ -2178,6 +2200,31 @@ generate_PUT(cctx_T *cctx, int regname, linenr_T lnum)
 	return FAIL;
     isn->isn_arg.put.put_regname = regname;
     isn->isn_arg.put.put_lnum = lnum;
+    return OK;
+}
+
+/*
+ * Generate a LOCKUNLOCK instruction.The root item, where the indexing starts
+ * to find the variable, is on the stack. The instr takes
+ * - the string to parse, "root.b[idx1][idx2].d.val", to find the variable
+ * - the class, if any, in which the string executes.
+ * - if the root item is a function argument
+ * A copy is made of "line".
+ */
+    int
+generate_LOCKUNLOCK(cctx_T *cctx, char_u *line, int is_arg)
+{
+    isn_T	*isn;
+
+    RETURN_OK_IF_SKIP(cctx);
+    if ((isn = generate_instr(cctx, ISN_LOCKUNLOCK)) == NULL)
+	return FAIL;
+    class_T *cl = cctx->ctx_ufunc != NULL ? cctx->ctx_ufunc->uf_class : NULL;
+    isn->isn_arg.lockunlock.lu_string = vim_strsave(line);
+    isn->isn_arg.lockunlock.lu_cl_exec = cl;
+    if (cl != NULL)
+	++cl->class_refcount;
+    isn->isn_arg.lockunlock.lu_is_arg = is_arg;
     return OK;
 }
 
@@ -2351,6 +2398,7 @@ generate_store_var(
 	case dest_vimvar:
 	    return generate_STORE(cctx, ISN_STOREV, vimvaridx, NULL);
 	case dest_script:
+	case dest_script_v9:
 	    {
 		int	    scriptvar_idx = lhs->lhs_scriptvar_idx;
 		int	    scriptvar_sid = lhs->lhs_scriptvar_sid;
@@ -2358,10 +2406,14 @@ generate_store_var(
 		{
 		    isntype_T   isn_type = ISN_STORES;
 
+		    // If "sn_import_autoload", generate ISN_STOREEXPORT (not
+		    // ISN_STORES) if destination is in a vim9script or if
+		    // there is no "sn_autoload_prefix".
 		    if (SCRIPT_ID_VALID(scriptvar_sid)
 			     && SCRIPT_ITEM(scriptvar_sid)->sn_import_autoload
-			     && SCRIPT_ITEM(scriptvar_sid)->sn_autoload_prefix
-								       == NULL)
+			     && ((SCRIPT_ITEM(scriptvar_sid)
+						  ->sn_autoload_prefix == NULL)
+				|| lhs->lhs_dest == dest_script_v9))
 		    {
 			// "import autoload './dir/script.vim'" - load script
 			// first
@@ -2485,7 +2537,6 @@ delete_instr(isn_T *isn)
 	case ISN_LOADOPT:
 	case ISN_LOADT:
 	case ISN_LOADW:
-	case ISN_LOCKUNLOCK:
 	case ISN_PUSHEXC:
 	case ISN_PUSHFUNC:
 	case ISN_PUSHS:
@@ -2498,6 +2549,11 @@ delete_instr(isn_T *isn)
 	case ISN_STOREW:
 	case ISN_STRINGMEMBER:
 	    vim_free(isn->isn_arg.string);
+	    break;
+
+	case ISN_LOCKUNLOCK:
+	    class_unref(isn->isn_arg.lockunlock.lu_cl_exec);
+	    vim_free(isn->isn_arg.lockunlock.lu_string);
 	    break;
 
 	case ISN_SUBSTITUTE:
@@ -2677,7 +2733,6 @@ delete_instr(isn_T *isn)
 	case ISN_COMPAREANY:
 	case ISN_COMPAREBLOB:
 	case ISN_COMPAREBOOL:
-	case ISN_COMPARECLASS:
 	case ISN_COMPAREDICT:
 	case ISN_COMPAREFLOAT:
 	case ISN_COMPAREFUNC:
@@ -2692,7 +2747,6 @@ delete_instr(isn_T *isn)
 	case ISN_COND2BOOL:
 	case ISN_DEBUG:
 	case ISN_DEFER:
-	case ISN_DEFEROBJ:
 	case ISN_DROP:
 	case ISN_ECHO:
 	case ISN_ECHOCONSOLE:

@@ -20,6 +20,13 @@ typedef int		colnr_T;
 typedef unsigned short	short_u;
 #endif
 
+// structure to store a string (including it's length)
+typedef struct
+{
+    char_u  *string;		// the string
+    size_t  length;		// length of the string (excluding the NUL)
+} string_T;
+
 /*
  * Position in file or buffer.
  */
@@ -55,6 +62,17 @@ typedef struct growarray
 } garray_T;
 
 #define GA_EMPTY    {0, 0, 0, 0, NULL}
+
+// On rare systems "char" is unsigned, sometimes we really want a signed 8-bit
+// value.
+typedef signed char	int8_T;
+typedef double		float_T;
+
+typedef struct typval_S		typval_T;
+typedef struct listvar_S	list_T;
+typedef struct dictvar_S	dict_T;
+typedef struct partial_S	partial_T;
+typedef struct blobvar_S	blob_T;
 
 typedef struct window_S		win_T;
 typedef struct wininfo_S	wininfo_T;
@@ -192,6 +210,8 @@ typedef struct
     int		wo_diff;
 # define w_p_diff w_onebuf_opt.wo_diff	// 'diff'
 #endif
+    char_u	*wo_eiw;
+# define w_p_eiw w_onebuf_opt.wo_eiw	// 'eventignorewin'
 #ifdef FEAT_FOLDING
     long	wo_fdc;
 # define w_p_fdc w_onebuf_opt.wo_fdc	// 'foldcolumn'
@@ -246,6 +266,8 @@ typedef struct
     long	wo_nuw;
 # define w_p_nuw w_onebuf_opt.wo_nuw	// 'numberwidth'
 #endif
+    int wo_wfb;
+#define w_p_wfb w_onebuf_opt.wo_wfb	// 'winfixbuf'
     int		wo_wfh;
 # define w_p_wfh w_onebuf_opt.wo_wfh	// 'winfixheight'
     int		wo_wfw;
@@ -387,6 +409,8 @@ typedef struct
 typedef struct {
     char_u	*ul_line;	// text of the line
     long	ul_len;		// length of the line including NUL, plus text
+				// properties
+    colnr_T	ul_textlen;	// length of the line excluding NUL and any text
 				// properties
 } undoline_T;
 
@@ -562,6 +586,7 @@ typedef struct buffheader buffheader_T;
 struct buffblock
 {
     buffblock_T	*b_next;	// pointer to next buffblock
+    size_t	b_strlen;	// length of b_str, excluding the NUL
     char_u	b_str[1];	// contents (actually longer)
 };
 
@@ -574,6 +599,7 @@ struct buffheader
     buffblock_T	*bh_curr;	// buffblock for appending
     int		bh_index;	// index for reading
     int		bh_space;	// space in bh_curr for appending
+    int		bh_create_newblock;	// create a new block?
 };
 
 typedef struct
@@ -589,11 +615,22 @@ typedef enum {
 } xp_prefix_T;
 
 /*
+ * :set operator types
+ */
+typedef enum {
+    OP_NONE = 0,
+    OP_ADDING,		// "opt+=arg"
+    OP_PREPENDING,	// "opt^=arg"
+    OP_REMOVING,	// "opt-=arg"
+} set_op_T;
+
+/*
  * used for completion on the command line
  */
 typedef struct expand
 {
-    char_u	*xp_pattern;		// start of item to expand
+    char_u	*xp_pattern;		// start of item to expand, guaranteed
+					// to be part of xp_line
     int		xp_context;		// type of expansion
     int		xp_pattern_len;		// bytes in xp_pattern before cursor
     xp_prefix_T	xp_prefix;
@@ -610,6 +647,7 @@ typedef struct expand
 					// file name completion
     int		xp_col;			// cursor position in line
     int		xp_selected;		// selected index in completion
+    char_u	*xp_orig;		// originally expanded string
     char_u	**xp_files;		// list of files
     char_u	*xp_line;		// text being completed
 #define EXPAND_BUF_LEN 256
@@ -620,8 +658,9 @@ typedef struct expand
  * values for xp_backslash
  */
 #define XP_BS_NONE	0	// nothing special for backslashes
-#define XP_BS_ONE	1	// uses one backslash before a space
-#define XP_BS_THREE	2	// uses three backslashes before a space
+#define XP_BS_ONE	0x1	// uses one backslash before a space
+#define XP_BS_THREE	0x2	// uses three backslashes before a space
+#define XP_BS_COMMA	0x4	// commas need to be escaped with a backslash
 
 /*
  * Variables shared between getcmdline(), redrawcmdline() and others.
@@ -787,7 +826,8 @@ typedef struct memline
 #define ML_ALLOCATED	0x10	// ml_line_ptr is an allocated copy
     int		ml_flags;
 
-    colnr_T	ml_line_len;	// length of the cached line, including NUL
+    colnr_T	ml_line_len;	// length of the cached line + NUL + text properties
+    colnr_T	ml_line_textlen;// length of the cached line + NUL, 0 if not known yet
     linenr_T	ml_line_lnum;	// line number of cached line, 0 if not valid
     char_u	*ml_line_ptr;	// pointer to cached line
 
@@ -1060,6 +1100,7 @@ struct vim_exception
     struct msglist	*messages;	// message(s) causing error exception
     char_u		*throw_name;	// name of the throw point
     linenr_T		throw_lnum;	// line number of the throw point
+    list_T		*stacktrace;	// stacktrace
     except_T		*caught;	// next exception on the caught stack
 };
 
@@ -1073,6 +1114,20 @@ struct cleanup_stuff
 {
     int pending;		// error/interrupt/exception state
     except_T *exception;	// exception value
+};
+
+/*
+ * Exception state that is saved and restored when calling timer callback
+ * functions and deferred functions.
+ */
+typedef struct exception_state_S exception_state_T;
+struct exception_state_S
+{
+    except_T	*estate_current_exception;
+    int		estate_did_throw;
+    int		estate_need_rethrow;
+    int		estate_trylevel;
+    int		estate_did_emsg;
 };
 
 #ifdef FEAT_SYN_HL
@@ -1159,6 +1214,7 @@ typedef struct attr_entry
 	    short_u	    fg_color;	// foreground color number
 	    short_u	    bg_color;	// background color number
 	    short_u	    ul_color;	// underline color number
+	    short_u	    font;	// font number
 # ifdef FEAT_TERMGUICOLORS
 	    guicolor_T	    fg_rgb;	// foreground color RGB
 	    guicolor_T	    bg_rgb;	// background color RGB
@@ -1252,6 +1308,7 @@ typedef struct hist_entry
     int		hisnum;		// identifying number
     int		viminfo;	// when TRUE hisstr comes from viminfo
     char_u	*hisstr;	// actual entry, separator char after the NUL
+    size_t	hisstrlen;	// length of hisstr (excluding the NUL)
     time_t	time_set;	// when it was typed, zero if unknown
 } histentry_T;
 
@@ -1278,6 +1335,9 @@ typedef struct mapblock mapblock_T;
 struct mapblock
 {
     mapblock_T	*m_next;	// next mapblock in list
+    mapblock_T	*m_alt;		// pointer to mapblock of the same mapping
+				// with an alternative form of m_keys, or NULL
+				// if there is no such mapblock
     char_u	*m_keys;	// mapped from, lhs
     char_u	*m_str;		// mapped to, rhs
     char_u	*m_orig_str;	// rhs as entered by the user
@@ -1401,18 +1461,6 @@ typedef long_u hash_T;		// Type for hi_hash
 # endif
 #endif
 
-// On rare systems "char" is unsigned, sometimes we really want a signed 8-bit
-// value.
-typedef signed char int8_T;
-
-typedef double	float_T;
-
-typedef struct typval_S typval_T;
-typedef struct listvar_S list_T;
-typedef struct dictvar_S dict_T;
-typedef struct partial_S partial_T;
-typedef struct blobvar_S blob_T;
-
 // Struct that holds both a normal function name and a partial_T, as used for a
 // callback argument.
 // When used temporarily "cb_name" is not allocated.  The refcounts to either
@@ -1441,6 +1489,7 @@ typedef struct ectx_S ectx_T;
 typedef struct instr_S instr_T;
 typedef struct class_S class_T;
 typedef struct object_S object_T;
+typedef struct typealias_S typealias_T;
 
 typedef enum
 {
@@ -1462,6 +1511,7 @@ typedef enum
     VAR_INSTR,		// "v_instr" is used
     VAR_CLASS,		// "v_class" is used (also used for interface)
     VAR_OBJECT,		// "v_object" is used
+    VAR_TYPEALIAS	// "v_typealias" is used
 } vartype_T;
 
 // A type specification.
@@ -1494,14 +1544,30 @@ typedef enum {
     VIM_ACCESS_ALL	// read/write everywhere
 } omacc_T;
 
+#define OCMFLAG_HAS_TYPE	0x01	// type specified explicitly
+#define OCMFLAG_FINAL		0x02	// "final" object/class member
+#define OCMFLAG_CONST		0x04	// "const" object/class member
+
+/*
+ * Object methods called by builtin functions (e.g. string(), empty(), etc.)
+ */
+typedef enum {
+    CLASS_BUILTIN_INVALID,
+    CLASS_BUILTIN_STRING,
+    CLASS_BUILTIN_EMPTY,
+    CLASS_BUILTIN_LEN,
+    CLASS_BUILTIN_MAX
+} class_builtin_T;
+
 /*
  * Entry for an object or class member variable.
  */
 typedef struct {
-    char_u	*ocm_name;   // allocated
+    char_u	*ocm_name;	// allocated
     omacc_T	ocm_access;
     type_T	*ocm_type;
-    char_u	*ocm_init;   // allocated
+    int		ocm_flags;
+    char_u	*ocm_init;	// allocated
 } ocmember_T;
 
 // used for the lookup table of a class member index and object method index
@@ -1513,8 +1579,10 @@ struct itf2class_S {
     // array with ints follows
 };
 
-#define CLASS_INTERFACE	    1
-#define CLASS_EXTENDED	    2	    // another class extends this one
+#define CLASS_INTERFACE	    0x1
+#define CLASS_EXTENDED	    0x2	    // another class extends this one
+#define CLASS_ABSTRACT	    0x4	    // abstract class
+#define CLASS_ENUM	    0x8	    // enum
 
 // "class_T": used for v_class of typval of VAR_CLASS
 // Also used for an interface (class_flags has CLASS_INTERFACE).
@@ -1525,6 +1593,8 @@ struct class_S
 
     int		class_refcount;
     int		class_copyID;		// used by garbage collection
+    class_T	*class_next_used;	// for list headed by "first_class"
+    class_T	*class_prev_used;	// for list headed by "first_class"
 
     class_T	*class_extends;		// parent class or NULL
 
@@ -1553,10 +1623,16 @@ struct class_S
     int		class_obj_method_count_child;	    // count without "extends"
     ufunc_T	**class_obj_methods;	// allocated
 
+					// index of builtin methods
+    int		class_builtin_methods[CLASS_BUILTIN_MAX];
+
     garray_T	class_type_list;	// used for type pointers
     type_T	class_type;		// type used for the class
     type_T	class_object_type;	// same as class_type but VAR_OBJECT
 };
+
+#define IS_INTERFACE(cl)	((cl)->class_flags & CLASS_INTERFACE)
+#define IS_ENUM(cl)		((cl)->class_flags & CLASS_ENUM)
 
 // Used for v_object of typval of VAR_OBJECT.
 // The member variables follow in an array of typval_T.
@@ -1569,6 +1645,13 @@ struct object_S
     object_T	*obj_next_used;	    // for list headed by "first_object"
     object_T	*obj_prev_used;	    // for list headed by "first_object"
     int		obj_copyID;	    // used by garbage collection
+};
+
+struct typealias_S
+{
+    int	    ta_refcount;
+    type_T  *ta_type;
+    char_u  *ta_name;
 };
 
 /*
@@ -1594,6 +1677,7 @@ struct typval_S
 	instr_T		*v_instr;	// instructions to execute
 	class_T		*v_class;	// class value (can be NULL)
 	object_T	*v_object;	// object value (can be NULL)
+	typealias_T	*v_typealias;	// user-defined type name
     }		vval;
 };
 
@@ -1788,8 +1872,11 @@ struct ufunc_S
     def_status_T uf_def_status; // UF_NOT_COMPILED, UF_TO_BE_COMPILED, etc.
     int		uf_dfunc_idx;	// only valid if uf_def_status is UF_COMPILED
 
-    class_T	*uf_class;	// for object method and constructor; does not
-				// count for class_refcount
+    class_T	*uf_class;	// for class/object method and constructor;
+				// does not count for class_refcount.
+				// class of the object which is invoking this
+				// function.
+    class_T	*uf_defclass;	// class where this function is defined.
 
     garray_T	uf_args;	// arguments, including optional arguments
     garray_T	uf_def_args;	// default argument expressions
@@ -1823,6 +1910,7 @@ struct ufunc_S
 # ifdef FEAT_PROFILE
     int		uf_profiling;	// TRUE when func is being profiled
     int		uf_prof_initialized;
+    hash_T	uf_hash;	// hash for uf_name when profiling
     // profiling the function as a whole
     int		uf_tm_count;	// nr of calls
     proftime_T	uf_tm_total;	// time spent in function + children
@@ -1848,6 +1936,7 @@ struct ufunc_S
 
     char_u	*uf_name_exp;	// if "uf_name[]" starts with SNR the name with
 				// "<SNR>" as a string, otherwise NULL
+    size_t	uf_namelen;	// length of uf_name (excluding the NUL)
     char_u	uf_name[4];	// name of function (actual size equals name);
 				// can start with <SNR>123_ (<SNR> is K_SPECIAL
 				// KS_EXTRA KE_SNR)
@@ -1872,6 +1961,14 @@ struct ufunc_S
 
 #define FC_OBJECT   0x4000	// object method
 #define FC_NEW	    0x8000	// constructor
+#define FC_ABSTRACT 0x10000	// abstract method
+
+// Is "ufunc" an object method?
+#define IS_OBJECT_METHOD(ufunc) ((ufunc->uf_flags & FC_OBJECT) == FC_OBJECT)
+// Is "ufunc" a class new() constructor method?
+#define IS_CONSTRUCTOR_METHOD(ufunc) ((ufunc->uf_flags & FC_NEW) == FC_NEW)
+// Is "ufunc" an abstract class method?
+#define IS_ABSTRACT_METHOD(ufunc) ((ufunc->uf_flags & FC_ABSTRACT) == FC_ABSTRACT)
 
 #define MAX_FUNC_ARGS	20	// maximum number of function arguments
 #define VAR_SHORT_LEN	20	// short variable name length
@@ -2052,6 +2149,7 @@ typedef struct
     int		sn_state;	// SN_STATE_ values
     char_u	*sn_save_cpo;	// 'cpo' value when :vim9script found
     char	sn_is_vimrc;	// .vimrc file, do not restore 'cpo'
+    char	sn_syml_checked;// flag: this has been checked for sym link
 
     // for a Vim9 script under "rtp/autoload/" this is "dir#scriptname#"
     char_u	*sn_autoload_prefix;
@@ -2288,6 +2386,7 @@ struct partial_S
 
     int		pt_copyID;	// funcstack may contain pointer to partial
     dict_T	*pt_dict;	// dict for "self"
+    object_T	*pt_obj;	// object method
 };
 
 typedef struct {
@@ -3053,6 +3152,19 @@ struct file_buffer
     int		b_marks_read;	// Have we read viminfo marks yet?
 #endif
 
+    int		b_modified_was_set;	// did ":set modified"
+    int		b_did_filetype;		// FileType event found
+    int		b_keep_filetype;	// value for did_filetype when starting
+					// to execute autocommands
+
+    // Set by the apply_autocmds_group function if the given event is equal to
+    // EVENT_FILETYPE. Used by the readfile function in order to determine if
+    // EVENT_BUFREADPOST triggered the EVENT_FILETYPE.
+    //
+    // Relying on this value requires one to reset it prior calling
+    // apply_autocmds_group().
+    int		b_au_did_filetype;
+
     /*
      * The following only used in undo.c.
      */
@@ -3128,6 +3240,8 @@ struct file_buffer
 #ifdef FEAT_FOLDING
     char_u	*b_p_cms;	// 'commentstring'
 #endif
+    char_u	*b_p_cot;	// 'completeopt' local value
+    unsigned	b_cot_flags;	// flags for 'completeopt'
     char_u	*b_p_cpt;	// 'complete'
 #ifdef BACKSLASH_IN_FILENAME
     char_u	*b_p_csl;	// 'completeslash'
@@ -3141,6 +3255,8 @@ struct file_buffer
 #ifdef FEAT_EVAL
     char_u	*b_p_tfu;	// 'tagfunc' option value
     callback_T	b_tfu_cb;	// 'tagfunc' callback
+    char_u	*b_p_ffu;	// 'findfunc' option value
+    callback_T	b_ffu_cb;	// 'findfunc' callback
 #endif
     int		b_p_eof;	// 'endoffile'
     int		b_p_eol;	// 'endofline'
@@ -3440,6 +3556,8 @@ struct diffblock_S
     diff_T	*df_next;
     linenr_T	df_lnum[DB_COUNT];	// line number in buffer
     linenr_T	df_count[DB_COUNT];	// nr of inserted/changed lines
+    int is_linematched;  // has the linematch algorithm ran on this diff hunk to divide it into
+			  // smaller diff hunks?
 };
 #endif
 
@@ -3686,8 +3804,7 @@ struct window_S
     synblock_T	*w_s;		    // for :ownsyntax
 #endif
 
-    int		w_closing;	    // window is being closed, don't let
-				    // autocommands close it too.
+    int		w_locked;	    // don't let autocommands close the window
 
     frame_T	*w_frame;	    // frame containing this window
 
@@ -4275,7 +4392,7 @@ struct VimMenu
     HMENU	submenu_id;	    // If this is submenu, add children here
     HWND	tearoff_handle;	    // hWnd of tearoff if created
 #endif
-#if FEAT_GUI_HAIKU
+#ifdef FEAT_GUI_HAIKU
     BMenuItem  *id;		    // Id of menu item
     BMenu  *submenu_id;		    // If this is submenu, add children here
 # ifdef FEAT_TOOLBAR
@@ -4299,15 +4416,18 @@ typedef int vimmenu_T;
  */
 typedef struct
 {
-    buf_T	*save_curbuf;	    // saved curbuf
     int		use_aucmd_win_idx;  // index in aucmd_win[] if >= 0
     int		save_curwin_id;	    // ID of saved curwin
     int		new_curwin_id;	    // ID of new curwin
     int		save_prevwin_id;    // ID of saved prevwin
     bufref_T	new_curbuf;	    // new curbuf
+    char_u	*tp_localdir;	    // saved value of tp_localdir
     char_u	*globaldir;	    // saved value of globaldir
     int		save_VIsual_active; // saved VIsual_active
     int		save_State;	    // saved State
+#ifdef FEAT_JOB_CHANNEL
+    int		save_prompt_insert; // saved b_prompt_insert
+#endif
 } aco_save_T;
 
 /*
@@ -4367,10 +4487,14 @@ typedef struct
  */
 typedef struct
 {
-    char_u	*pum_text;	// main menu text
-    char_u	*pum_kind;	// extra kind text (may be truncated)
-    char_u	*pum_extra;	// extra menu text (may be truncated)
-    char_u	*pum_info;	// extra info
+    char_u	*pum_text;		// main menu text
+    char_u	*pum_kind;		// extra kind text (may be truncated)
+    char_u	*pum_extra;		// extra menu text (may be truncated)
+    char_u	*pum_info;		// extra info
+    int		pum_score;		// fuzzy match score
+    int		pum_idx;		// index of item before sorting by score
+    int		pum_user_abbr_hlattr;	// highlight attribute for abbr
+    int		pum_user_kind_hlattr;	// highlight attribute for kind
 } pumitem_T;
 
 /*
@@ -4520,6 +4644,18 @@ typedef struct
  *	"tv"	    points to the (first) list item value
  *	"li"	    points to the (first) list item
  *	"range", "n1", "n2" and "empty2" indicate what items are used.
+ * For a plain class or object:
+ *	"name"	    points to the variable name.
+ *	"exp_name"  is NULL.
+ *	"tv"	    points to the variable
+ *	"is_root"   TRUE
+ * For a variable in a class/object: (class is not NULL)
+ *	"name"	    points to the (expanded) variable name.
+ *	"exp_name"  NULL or non-NULL, to be freed later.
+ *	"tv"	    May point to class/object variable.
+ *	"object"    object containing variable, NULL if class variable
+ *	"class"	    class of object or class containing variable
+ *	"oi"	    index into class/object of tv
  * For an existing Dict item:
  *	"name"	    points to the (expanded) variable name.
  *	"exp_name"  NULL or non-NULL, to be freed later.
@@ -4556,7 +4692,22 @@ typedef struct lval_S
     type_T	*ll_valtype;	// type expected for the value or NULL
     blob_T	*ll_blob;	// The Blob or NULL
     ufunc_T	*ll_ufunc;	// The function or NULL
+    object_T	*ll_object;	// The object or NULL, class is not NULL
+    class_T	*ll_class;	// The class or NULL, object may be NULL
+    int		ll_oi;		// The object/class member index
+    int		ll_is_root;	// TRUE if ll_tv is the lval_root, like a
+				// plain object/class. ll_tv is variable.
+    garray_T	ll_type_list;   // list of pointers to allocated types
 } lval_T;
+
+/**
+ * This specifies optional parameters for get_lval(). Arguments may be NULL.
+ */
+typedef struct lval_root_S {
+    typval_T	*lr_tv;		// Base typval.
+    class_T	*lr_cl_exec;	// Executing class for access checking.
+    int		lr_is_arg;	// name is an arg (not a member).
+} lval_root_T;
 
 // Structure used to save the current state.  Used when executing Normal mode
 // commands while in any other mode.
@@ -4649,7 +4800,7 @@ struct block_def
 // Each yank register has an array of pointers to lines.
 typedef struct
 {
-    char_u	**y_array;	// pointer to array of line pointers
+    string_T	*y_array;	// pointer to array of string_T structs
     linenr_T	y_size;		// number of lines in y_array
     char_u	y_type;		// MLINE, MCHAR or MBLOCK
     colnr_T	y_width;	// only set if y_type == MBLOCK
@@ -4672,6 +4823,7 @@ typedef struct soffset
 typedef struct spat
 {
     char_u	    *pat;	// the pattern (in allocated memory) or NULL
+    size_t	    patlen;	// the length of the pattern (0 if pat is NULL)
     int		    magic;	// magicness of the pattern
     int		    no_scs;	// no smartcase for this pattern
     soffset_T	    off;
@@ -4772,14 +4924,20 @@ typedef enum {
     WT_ARGUMENT,
     WT_VARIABLE,
     WT_MEMBER,
-    WT_METHOD,
+    WT_METHOD,		// object method
+    WT_METHOD_ARG,	// object method argument type
+    WT_METHOD_RETURN,	// object method return type
+    WT_CAST,		// type cast
 } wherekind_T;
 
-// Struct used to pass to error messages about where the error happened.
+// Struct used to pass the location of a type check.  Used in error messages to
+// indicate where the error happened.  Also used for doing covariance type
+// check for object method return type and contra-variance type check for
+// object method arguments.
 typedef struct {
     char	*wt_func_name;  // function name or NULL
     char	wt_index;	// argument or variable index, 0 means unknown
-    wherekind_T	wt_kind;	// "variable" when TRUE, "argument" otherwise
+    wherekind_T	wt_kind;	// type check location
 } where_T;
 
 #define WHERE_INIT {NULL, 0, WT_UNKNOWN}
@@ -4790,11 +4948,12 @@ typedef struct {
     hashtab_T	sve_hashtab;
 } save_v_event_T;
 
-// Enum used by filter(), map() and mapnew()
+// Enum used by filter(), map(), mapnew() and foreach()
 typedef enum {
     FILTERMAP_FILTER,
     FILTERMAP_MAP,
-    FILTERMAP_MAPNEW
+    FILTERMAP_MAPNEW,
+    FILTERMAP_FOREACH
 } filtermap_T;
 
 // Structure used by switch_win() to pass values to restore_win()
@@ -4818,6 +4977,10 @@ typedef struct {
     win_T	*cts_win;
     char_u	*cts_line;		// start of the line
     char_u	*cts_ptr;		// current position in line
+#ifdef FEAT_LINEBREAK
+    int		cts_bri_size;		// cached size of 'breakindent', or -1
+					// if not computed yet
+#endif
 #ifdef FEAT_PROP_POPUP
     int		cts_text_prop_count;	// number of text props; when zero
 					// cts_text_props is not used
@@ -4845,6 +5008,7 @@ typedef struct
     char_u	*os_varp;
     int		os_idx;
     int		os_flags;
+    set_op_T	os_op;
 
     // old value of the option (can be a string, number or a boolean)
     union
@@ -4861,10 +5025,6 @@ typedef struct
 	int	boolean;
 	char_u	*string;
     } os_newval;
-
-    // When set by the called function: Stop processing the option further.
-    // Currently only used for boolean options.
-    int		os_doskip;
 
     // Option value was checked to be safe, no need to set P_INSECURE
     // Used for the 'keymap', 'filetype' and 'syntax' options.
@@ -4886,7 +5046,37 @@ typedef struct
     // is parameterized, then the "os_errbuf" buffer is used to store the error
     // message (when it is not NULL).
     char	*os_errbuf;
+    // length of the error buffer
+    size_t	os_errbuflen;
 } optset_T;
+
+/*
+ * Argument for the callback function (opt_expand_cb_T) invoked after a string
+ * option value is expanded for cmdline completion.
+ */
+typedef struct
+{
+    // Pointer to the option variable. It's always a string.
+    char_u	*oe_varp;
+    // The original option value, escaped.
+    char_u	*oe_opt_value;
+
+    // TRUE if using set+= instead of set=
+    int		oe_append;
+    // TRUE if we would like to add the original option value as the first
+    // choice.
+    int		oe_include_orig_val;
+
+    // Regex from the cmdline, for matching potential options against.
+    regmatch_T	*oe_regmatch;
+    // The expansion context.
+    expand_T	*oe_xp;
+
+    // The full argument passed to :set. For example, if the user inputs
+    // ':set dip=icase,algorithm:my<Tab>', oe_xp->xp_pattern will only have
+    // 'my', but oe_set_arg will contain the whole 'icase,algorithm:my'.
+    char_u	*oe_set_arg;
+} optexpand_T;
 
 /*
  * Spell checking variables passed from win_update() to win_line().
@@ -4902,3 +5092,24 @@ typedef struct {
     linenr_T	spv_capcol_lnum;    // line number for "cap_col"
 #endif
 } spellvars_T;
+
+// Return the length of a string literal
+#define STRLEN_LITERAL(s) (sizeof(s) - 1)
+
+// Store a key/value (string) pair
+typedef struct
+{
+    int	    key;        // the key
+    string_T value;	// the value
+} keyvalue_T;
+
+#define KEYVALUE_ENTRY(k, v) \
+    {(k), {((char_u *)v), STRLEN_LITERAL(v)}}
+
+#if defined(UNIX) || defined(MSWIN) || defined(VMS)
+// Defined as signed, to return -1 on error
+struct cellsize {
+    int cs_xpixel;
+    int cs_ypixel;
+};
+#endif

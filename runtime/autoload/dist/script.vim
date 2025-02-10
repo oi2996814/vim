@@ -4,7 +4,7 @@ vim9script
 # Invoked from "scripts.vim" in 'runtimepath'
 #
 # Maintainer:	The Vim Project <https://github.com/vim/vim>
-# Last Change:	2023 Aug 10
+# Last Change:	2025 Jan 20
 # Former Maintainer:	Bram Moolenaar <Bram@vim.org>
 
 export def DetectFiletype()
@@ -133,6 +133,9 @@ export def Exe2filetype(name: string, line1: string): string
   elseif name =~ 'node\(js\)\=\>\|js\>' || name =~ 'rhino\>'
     return 'javascript'
 
+  elseif name =~# 'just'
+    return 'just'
+
     # BC calculator
   elseif name =~ '^bc\>'
     return 'bc'
@@ -216,6 +219,22 @@ export def Exe2filetype(name: string, line1: string): string
     # Rexx
   elseif name =~ '^\%(rexx\|regina\)\>'
     return 'rexx'
+
+    # Janet
+  elseif name =~ '^janet\>'
+    return 'janet'
+
+    # Dart
+  elseif name =~ '^dart\>'
+    return 'dart'
+
+    # Execline (s6)
+  elseif name =~ '^execlineb\>'
+    return 'execline'
+
+    # Vim
+  elseif name =~ '^vim\>'
+    return 'vim'
 
   endif
 
@@ -361,7 +380,7 @@ def DetectFromText(line1: string)
 
     # Strace
     # inaccurate fast match first, then use accurate slow match
-  elseif (line1 =~ 'execve(' && line1 =~ '^[0-9:.]* *execve(')
+  elseif (line1 =~ 'execve(' && line1 =~ '^[0-9:. ]*execve(')
 	   || line1 =~ '^__libc_start_main'
     setl ft=strace
 

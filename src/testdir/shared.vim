@@ -25,10 +25,10 @@ func PythonProg()
     if !(has('job') || executable('pkill'))
       return ''
     endif
-    if executable('python')
-      let s:python = 'python'
-    elseif executable('python3')
+    if executable('python3')
       let s:python = 'python3'
+    elseif executable('python')
+      let s:python = 'python'
     else
       return ''
     end
@@ -59,7 +59,7 @@ func RunCommand(cmd)
     let job = job_start(a:cmd, {"stoponexit": "hup"})
     call job_setoptions(job, {"stoponexit": "kill"})
   elseif has('win32')
-    exe 'silent !start cmd /c start "test_channel" ' . a:cmd
+    exe 'silent !start cmd /D /c start "test_channel" ' . a:cmd
   else
     exe 'silent !' . a:cmd . '&'
   endif
@@ -113,6 +113,8 @@ func RunServer(cmd, testfunc, args)
     endif
 
     call call(function(a:testfunc), [port])
+  catch /E901.*Address family for hostname not supported/
+    throw 'Skipped: Invalid network setup ("' .. v:exception .. '" in ' .. v:throwpoint .. ')'
   catch
     call assert_report('Caught exception: "' . v:exception . '" in ' . v:throwpoint)
   finally
@@ -298,7 +300,8 @@ func GetVimCommand(...)
   endif
   let cmd .= ' --not-a-term'
   let cmd .= ' --gui-dialog-file guidialogfile'
-  let cmd = substitute(cmd, 'VIMRUNTIME=\S\+', '', '')
+  " remove any environment variables
+  let cmd = substitute(cmd, '[A-Z_]\+=\S\+ *', '', 'g')
 
   " If using valgrind, make sure every run uses a different log file.
   if cmd =~ 'valgrind.*--log-file='
@@ -314,6 +317,14 @@ endfunc
 func RunningWithValgrind()
   return GetVimCommand() =~ '\<valgrind\>'
 endfunc
+
+func RunningAsan()
+  return exists("$ASAN_OPTIONS")
+endfunc
+
+func ValgrindOrAsan()
+  return RunningWithValgrind() || RunningAsan()
+endfun
 
 " Get the command to run Vim, with --clean instead of "-u NONE".
 func GetVimCommandClean()
@@ -361,7 +372,7 @@ func RunVimPiped(before, after, arguments, pipecmd)
   " Optionally run Vim under valgrind
   " let cmd = 'valgrind --tool=memcheck --leak-check=yes --num-callers=25 --log-file=valgrind ' . cmd
 
-  exe "silent !" . a:pipecmd . cmd . args . ' ' . a:arguments
+  exe "silent !" .. a:pipecmd .. ' ' ..  cmd .. args .. ' ' .. a:arguments
 
   if len(a:before) > 0
     call delete('Xbefore.vim')

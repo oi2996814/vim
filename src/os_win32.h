@@ -7,7 +7,7 @@
  */
 
 /*
- * Win32 (Windows NT and Windows 95) machine-dependent things.
+ * Win32 machine-dependent things.
  */
 
 #include "os_dos.h"		// common MS-DOS and Win32 stuff
@@ -85,6 +85,10 @@
 # define COBJMACROS	// For OLE: Enable "friendlier" access to objects
 #endif
 #ifndef PROTO
+// Must include winsock2.h before windows.h since it conflicts with winsock.h
+// (included in windows.h).
+# include <winsock2.h>
+# include <ws2tcpip.h>
 # include <windows.h>
 
 // Weird: rpcndr.h defines "small" to "char", which causes trouble

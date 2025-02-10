@@ -102,18 +102,18 @@ static void luaV_call_lua_func_free(void *state);
 
 #ifdef DYNAMIC_LUA
 
-#ifndef MSWIN
+#ifdef MSWIN
+# define load_dll vimLoadLib
+# define symbol_from_dll GetProcAddress
+# define close_dll FreeLibrary
+# define load_dll_error GetWin32Error
+#else
 # include <dlfcn.h>
 # define HANDLE void*
 # define load_dll(n) dlopen((n), RTLD_LAZY|RTLD_GLOBAL)
 # define symbol_from_dll dlsym
 # define close_dll dlclose
 # define load_dll_error dlerror
-#else
-# define load_dll vimLoadLib
-# define symbol_from_dll GetProcAddress
-# define close_dll FreeLibrary
-# define load_dll_error GetWin32Error
 #endif
 
 // lauxlib
@@ -595,7 +595,7 @@ luaV_pushtypval(lua_State *L, typval_T *tv)
 	case VAR_BOOL:
 	case VAR_SPECIAL:
 	    if (tv->vval.v_number <= VVAL_TRUE)
-		lua_pushinteger(L, (int) tv->vval.v_number);
+		lua_pushboolean(L, (int) tv->vval.v_number);
 	    else
 		lua_pushnil(L);
 	    break;
@@ -1900,6 +1900,16 @@ luaV_setvar(lua_State *L)
 	}
 	else
 	{
+	    int type_error = FALSE;
+	    if (dict == get_vimvar_dict()
+	       && !before_set_vvar((char_u *)name, di, &tv, TRUE, &type_error))
+	    {
+		clear_tv(&tv);
+		if (type_error)
+		    return luaL_error(L,
+				"Setting v:%s to value with wrong type", name);
+		return 0;
+	    }
 	    // Clear the old value
 	    clear_tv(&di->di_tv);
 	    // Update the value
@@ -2682,9 +2692,12 @@ ex_luado(exarg_T *eap)
 	    luaV_emsg(L);
 	    break;
 	}
+
 	// Catch the command switching to another buffer.
-	if (curbuf != was_curbuf)
+	// Check the line number, the command may have deleted lines.
+	if (curbuf != was_curbuf || l > curbuf->b_ml.ml_line_count)
 	    break;
+
 	if (lua_isstring(L, -1)) // update line?
 	{
 #ifdef HAVE_SANDBOX

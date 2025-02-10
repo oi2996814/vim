@@ -568,7 +568,7 @@ endfunc
 func Test_mkview_terminal_windows()
   CheckFeature terminal
 
-  " create two window on the same terminal to check this is handled OK
+  " create two windows on the same terminal to check this is handled OK
   terminal
   let term_buf = bufnr()
   exe 'sbuf ' .. term_buf
@@ -708,11 +708,11 @@ endfunc
 
 func Test_mkview_no_file_name()
   new
-  " :mkview or :mkview {nr} should fail in a unnamed buffer.
+  " :mkview or :mkview {nr} should fail in an unnamed buffer.
   call assert_fails('mkview', 'E32:')
   call assert_fails('mkview 1', 'E32:')
 
-  " :mkview {file} should succeed in a unnamed buffer.
+  " :mkview {file} should succeed in an unnamed buffer.
   mkview Xview
   help
   source Xview
@@ -1270,7 +1270,10 @@ func Test_mkview_default_home()
     " use escape() to handle backslash path separators
     call assert_match('^' .. escape($ORIGHOME, '\') .. '/vimfiles', &viewdir)
   elseif has('unix')
-    call assert_match('^' .. $ORIGHOME .. '/.vim', &viewdir)
+    call assert_match(
+          \ '^' .. $ORIGHOME .. '/.vim\|' ..
+          \ '^' .. $XDG_CONFIG_HOME .. '/vim'
+          \ , &viewdir)
   elseif has('amiga')
     call assert_match('^home:vimfiles', &viewdir)
   elseif has('mac')

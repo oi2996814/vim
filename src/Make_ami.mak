@@ -53,8 +53,8 @@ endif
 
 # OS specific compiler flags
 ifeq ($(UNM),AmigaOS)
-LDFLAGS = -mcrt=clib2 -lauto -lm -lnet
-CFLAGS += -DHAVE_FSYNC -D__USE_INLINE__ -mcrt=clib2
+LDFLAGS = -lauto
+CFLAGS += -DHAVE_FSYNC -D__USE_INLINE__
 else
 ifeq ($(UNM),AROS)
 LDFLAGS = -DHAVE_FSYNC -ldebug
@@ -114,6 +114,7 @@ SRC += \
 	float.c \
 	fold.c \
 	getchar.c \
+	gc.c \
 	hardcopy.c \
 	hashtab.c \
 	help.c \
@@ -122,6 +123,7 @@ SRC += \
 	indent.c \
 	insexpand.c \
 	json.c \
+	linematch.c\
 	list.c \
 	locale.c \
 	logfile.c \

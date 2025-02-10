@@ -690,7 +690,7 @@ buf_write(
     int		    write_undo_file = FALSE;
     context_sha256_T sha_ctx;
 #endif
-    unsigned int    bkc = get_bkc_value(buf);
+    unsigned int    bkc = get_bkc_flags(buf);
     pos_T	    orig_start = buf->b_op_start;
     pos_T	    orig_end = buf->b_op_end;
 
@@ -1350,7 +1350,7 @@ buf_write(
 		p = copybuf + STRLEN(copybuf);
 		if (after_pathsep(copybuf, p) && p[-1] == p[-2])
 		    // Ends with '//', use full path
-		    if ((p = make_percent_swname(copybuf, fname)) != NULL)
+		    if ((p = make_percent_swname(copybuf, p, fname)) != NULL)
 		    {
 			backup = modname(p, backup_ext, FALSE);
 			vim_free(p);
@@ -1471,6 +1471,9 @@ buf_write(
 # if defined(HAVE_SELINUX) || defined(HAVE_SMACK)
 			mch_copy_sec(fname, backup);
 # endif
+# ifdef FEAT_XATTR
+			mch_copy_xattr(fname, backup);
+# endif
 #endif
 
 			// copy the file.
@@ -1505,6 +1508,9 @@ buf_write(
 #endif
 #if defined(HAVE_SELINUX) || defined(HAVE_SMACK)
 			mch_copy_sec(fname, backup);
+#endif
+#ifdef FEAT_XATTR
+			mch_copy_xattr(fname, backup);
 #endif
 #ifdef MSWIN
 			(void)mch_copy_file_attribute(fname, backup);
@@ -1558,7 +1564,7 @@ buf_write(
 		p = IObuff + STRLEN(IObuff);
 		if (after_pathsep(IObuff, p) && p[-1] == p[-2])
 		    // path ends with '//', use full path
-		    if ((p = make_percent_swname(IObuff, fname)) != NULL)
+		    if ((p = make_percent_swname(IObuff, p, fname)) != NULL)
 		    {
 			backup = modname(p, backup_ext, FALSE);
 			vim_free(p);
@@ -2196,10 +2202,17 @@ restore_backup:
 	}
 #endif
 
-#if defined(HAVE_SELINUX) || defined(HAVE_SMACK)
+#if defined(HAVE_SELINUX) || defined(HAVE_SMACK) || defined(FEAT_XATTR)
 	// Probably need to set the security context.
 	if (!backup_copy)
+	{
+#if defined(HAVE_SELINUX) || defined(HAVE_SMACK)
 	    mch_copy_sec(backup, wfname);
+#endif
+#ifdef FEAT_XATTR
+	    mch_copy_xattr(backup, wfname);
+#endif
+	}
 #endif
 
 #ifdef UNIX

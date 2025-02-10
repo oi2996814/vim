@@ -480,7 +480,7 @@ else
   AC_MSG_RESULT(yes)
 fi
 if test "$enable_smack" = "yes"; then
-  AC_CHECK_HEADER([attr/xattr.h], true, enable_smack="no")
+  AC_CHECK_HEADER([sys/xattr.h], true, enable_smack="no")
 fi
 if test "$enable_smack" = "yes"; then
   AC_MSG_CHECKING(for XATTR_NAME_SMACKEXEC in linux/xattr.h)
@@ -511,6 +511,18 @@ if test "x$found_smack" = "x"; then
   else
      AC_MSG_RESULT(yes)
   fi
+fi
+
+dnl enable xattr support
+AC_MSG_CHECKING(--enable-xattr argument)
+AC_ARG_ENABLE(xattr,
+	[  --disable-xattr	  Do not check for XATTR support.],
+	, enable_xattr="yes")
+if test "$enable_xattr" = "yes"; then
+  AC_MSG_RESULT(yes)
+  AC_CHECK_HEADER([sys/xattr.h], [AC_DEFINE(HAVE_XATTR)])
+else
+  AC_MSG_RESULT(no)
 fi
 
 dnl Check user requested features.
@@ -1120,31 +1132,58 @@ if test "$enable_perlinterp" = "yes" -o "$enable_perlinterp" = "dynamic"; then
       vi_cv_perllib=`$vi_cv_path_perl -MConfig -e 'print $Config{privlibexp}'`
       AC_SUBST(vi_cv_perllib)
       vi_cv_perl_extutils=unknown_perl_extutils_path
-      for extutils_rel_path in ExtUtils vendor_perl/ExtUtils; do
-	xsubpp_path="$vi_cv_perllib/$extutils_rel_path/xsubpp"
-	if test -f "$xsubpp_path"; then
-	  vi_cv_perl_xsubpp="$xsubpp_path"
-	fi
-      done
+
+      AC_MSG_CHECKING(--with-xsubpp path)
+      vi_cv_perl_xsubpp=
+      AC_ARG_WITH(xsubpp, [  --with-xsubpp=PATH  path to the xsubpp command], [
+            if test -f "$withval"
+            then
+	      vi_cv_perl_xsubpp="$withval"
+            fi
+      ])
+
+      if test "x$vi_cv_perl_xsubpp" = "x"
+      then
+	for extutils_rel_path in ExtUtils vendor_perl/ExtUtils; do
+	  xsubpp_path="$vi_cv_perllib/$extutils_rel_path/xsubpp"
+	  if test -f "$xsubpp_path"; then
+	    vi_cv_perl_xsubpp="$xsubpp_path"
+	  fi
+	done
+      fi
+
+      if test "x$vi_cv_perl_xsubpp" = "x"
+      then
+        AC_MSG_RESULT(empty)
+      else
+        AC_MSG_RESULT($vi_cv_perl_xsubpp)
+      fi
       AC_SUBST(vi_cv_perl_xsubpp)
+
       dnl Remove "-fno-something", it breaks using cproto.
       dnl Remove "-fdebug-prefix-map", it isn't supported by clang.
       dnl Remove "FORTIFY_SOURCE", it will be defined twice.
-      dnl remove -pipe and -Wxxx, it confuses cproto
+      dnl Remove -pipe and -Wxxx, it confuses cproto
+      dnl Remove -flto[=auto], it causes link failures for clang
       perlcppflags=`$vi_cv_path_perl -Mlib=$srcdir -MExtUtils::Embed \
 		-e 'ccflags;perl_inc;print"\n"' | sed -e 's/-fno[[^ ]]*//' \
 		-e 's/-fdebug-prefix-map[[^ ]]*//g' \
 		-e 's/-pipe //' \
+		-e 's/-flto\(=auto\)\? //' \
 		-e 's/-W[[^ ]]*//g' \
 		-e 's/-D_FORTIFY_SOURCE=.//g'`
       dnl Remove "-lc", it breaks on FreeBSD when using "-pthread".
+      dnl Remove -specs=<file-path>, the hardened flags cause relocation errors
       perllibs=`cd $srcdir; $vi_cv_path_perl -MExtUtils::Embed -e 'ldopts' | \
 		sed -e '/Warning/d' -e '/Note (probably harmless)/d' \
+			-e 's/-specs=[[^ ]*]//g' \
 			-e 's/-bE:perl.exp//' -e 's/-lc //'`
       dnl Don't add perl lib to $LIBS: if it's not in LD_LIBRARY_PATH
       dnl a test in configure may fail because of that.
+      dnl Remove -specs=<file-path>, the hardened flags cause relocation errors
       perlldflags=`cd $srcdir; $vi_cv_path_perl -MExtUtils::Embed \
-		-e 'ccdlflags' | sed -e 's/-bE:perl.exp//'`
+		-e 'ccdlflags' | sed -e 's/-bE:perl.exp//' \
+		-e 's/-specs=[[^ ]*]//g' `
 
       dnl check that compiling a simple program still works with the flags
       dnl added for Perl.
@@ -1500,18 +1539,25 @@ if test "$enable_python3interp" = "yes" -o "$enable_python3interp" = "dynamic"; 
       AC_MSG_RESULT(yep)
 
       dnl -- get the stable ABI version if passed in
+      python3_stable_abi_default=3.8
       AC_MSG_CHECKING(--with-python3-stable-abi argument)
       AC_SUBST(vi_cv_var_python3_stable_abi)
-      AC_ARG_WITH(python3-stable-abi, [  --with-python3-stable-abi=VERSION  stable ABI version to target (e.g. 3.8)],
-        vi_cv_var_python3_stable_abi="$withval"; AC_MSG_RESULT($vi_cv_var_python3_stable_abi),
-        AC_MSG_RESULT(no))
+      AC_ARG_WITH(python3-stable-abi, [  --with-python3-stable-abi=VERSION  stable ABI version to target (default: 3.8)],
+        [
+     if test "X$withval" = "Xyes"; then
+       vi_cv_var_python3_stable_abi=$python3_stable_abi_default
+     else
+       vi_cv_var_python3_stable_abi="$withval"
+     fi
+     AC_MSG_RESULT($vi_cv_var_python3_stable_abi)],
+     AC_MSG_RESULT(no))
       if test "X$vi_cv_var_python3_stable_abi" != "X"; then
         AC_CACHE_VAL(vi_cv_var_python3_stable_abi_hex,
         [
          vi_cv_var_python3_stable_abi_hex=`
          ${vi_cv_path_python3} -c \
          "major_minor='${vi_cv_var_python3_stable_abi}'.split('.'); print('0x{0:X}'.format( (int(major_minor.__getitem__(0))<<24) + (int(major_minor.__getitem__(1))<<16) ))"` ])
-        if test "X$vi_cv_var_python3_stable_abi_hex" == "X"; then
+        if test "X$vi_cv_var_python3_stable_abi_hex" = "X"; then
           AC_MSG_ERROR([can't parse Python 3 stable ABI version. It should be "<major>.<minor>"])
         fi
       fi
@@ -2065,7 +2111,7 @@ if test "$enable_rubyinterp" = "yes" -o "$enable_rubyinterp" = "dynamic"; then
 	librubyarg=`$vi_cv_path_ruby -r rbconfig -e "print $ruby_rbconfig.expand($ruby_rbconfig::CONFIG[['LIBRUBYARG']])"`
 	librubya=`$vi_cv_path_ruby -r rbconfig -e "print $ruby_rbconfig.expand($ruby_rbconfig::CONFIG[['LIBRUBY_A']])"`
 	rubylibdir=`$vi_cv_path_ruby -r rbconfig -e "print $ruby_rbconfig.expand($ruby_rbconfig::CONFIG[['libdir']])"`
-	if test -f "$rubylibdir/$librubya" || expr "$librubyarg" : "-lruby"; then
+	if test -f "$rubylibdir/$librubya" || expr "$librubyarg" : "-lruby" >/dev/null; then
 	  RUBY_LIBS="$RUBY_LIBS -L$rubylibdir"
 	elif test "$librubyarg" = "libruby.a"; then
 	  dnl required on Mac OS 10.3 where libruby.a doesn't exist
@@ -2667,8 +2713,11 @@ system ("touch conf.gtktest");
 tmp_version = g_strdup("$min_gtk_version");
 if (sscanf(tmp_version, "%d.%d.%d", &major, &minor, &micro) != 3) {
    printf("%s, bad version string\n", "$min_gtk_version");
+   g_free(tmp_version);
    exit(1);
  }
+
+g_free(tmp_version);
 
 if ((gtk_major_version > major) ||
     ((gtk_major_version == major) && (gtk_minor_version > minor)) ||
@@ -3248,7 +3297,8 @@ int main() { exit(toupper('A') == 'A' && tolower('z') == 'z'); }
   ],[
     vim_cv_toupper_broken=no
   ],[
-    AC_MSG_ERROR(cross-compiling: please set 'vim_cv_toupper_broken')
+    vim_cv_toupper_broken=no
+    AC_MSG_WARN(cross-compiling: consider setting 'vim_cv_toupper_broken')
   ])])
 
 if test "x$vim_cv_toupper_broken" = "xyes" ; then
@@ -3264,13 +3314,6 @@ AC_MSG_CHECKING(whether __attribute__((unused)) is allowed)
 AC_COMPILE_IFELSE([AC_LANG_PROGRAM([#include <stdio.h>], [int x __attribute__((unused));])],
 	AC_MSG_RESULT(yes); AC_DEFINE(HAVE_ATTRIBUTE_UNUSED),
 	AC_MSG_RESULT(no))
-
-dnl Checks for header files.
-AC_CHECK_HEADER(elf.h, HAS_ELF=1)
-dnl AC_CHECK_HEADER(dwarf.h, SVR4=1)
-if test "$HAS_ELF" = 1; then
-  AC_CHECK_LIB(elf, main)
-fi
 
 AC_HEADER_DIRENT
 
@@ -3468,7 +3511,7 @@ else
 # include <stddef.h>
 #endif
 int main() {char *s; s=(char *)tgoto("%p1%d", 0, 1); exit(0); }])],
-			  res="OK", res="FAIL", res="FAIL")
+			  res="OK", res="FAIL", res="OK")
       if test "$res" = "OK"; then
 	break
       fi
@@ -3507,13 +3550,14 @@ AC_CACHE_CHECK([whether we talk terminfo], [vim_cv_terminfo],
 # include <stddef.h>
 #endif
 int main()
-{char *s; s=(char *)tgoto("%p1%d", 0, 1); exit(!strcmp(s==0 ? "" : s, "1")); }
+{char *s; s=(char *)tgoto("%p1%d", 0, 1); exit(!!strcmp(s==0 ? "" : s, "1")); }
     ]])],[
+      vim_cv_terminfo=yes
+    ],[
       vim_cv_terminfo=no
     ],[
       vim_cv_terminfo=yes
-    ],[
-      AC_MSG_ERROR(cross-compiling: please set 'vim_cv_terminfo')
+      AC_MSG_WARN(cross-compiling: consider setting 'vim_cv_terminfo')
     ])
   ])
 
@@ -3539,7 +3583,8 @@ int main()
     ],[
       vim_cv_tgetent=non-zero
     ],[
-      AC_MSG_ERROR(failed to compile test program.)
+      vim_cv_tgetent=zero
+      AC_MSG_WARN(cross-compiling: consider setting 'vim_cv_tgetent')
     ])
   ])
 
@@ -3705,7 +3750,8 @@ int main()
     ],[
       vim_cv_getcwd_broken=yes
     ],[
-      AC_MSG_ERROR(cross-compiling: please set 'vim_cv_getcwd_broken')
+      vim_cv_getcwd_broken=no
+      AC_MSG_WARN(cross-compiling: consider setting 'vim_cv_getcwd_broken')
     ])
   ])
 
@@ -3723,7 +3769,7 @@ AC_CHECK_FUNCS(fchdir fchown fchmod fsync getcwd getpseudotty \
 	sigprocmask sigvec strcasecmp strcoll strerror strftime stricmp strncasecmp \
 	strnicmp strpbrk strptime strtol tgetent towlower towupper iswupper \
 	tzset usleep utime utimes mblen ftruncate unsetenv posix_openpt \
-	clock_gettime)
+	clock_gettime sync)
 AC_FUNC_SELECT_ARGTYPES
 AC_FUNC_FSEEKO
 
@@ -3829,30 +3875,14 @@ AC_COMPILE_IFELSE([AC_LANG_PROGRAM(
 	AC_MSG_RESULT(no))
 
 dnl Check for timer_create. It probably requires the 'rt' library.
-dnl Run the program to find out if timer_create(CLOCK_MONOTONIC) actually
-dnl works, on Solaris timer_create() exists but fails at runtime.
 AC_CACHE_CHECK([for timer_create without -lrt], [vim_cv_timer_create], [
-AC_RUN_IFELSE([AC_LANG_PROGRAM([
-#if STDC_HEADERS
-# include <stdlib.h>
-# include <stddef.h>
-#endif
-#include <signal.h>
-#include <time.h>
-static void set_flag(union sigval sv) {}
-], [
-  struct timespec ts;
-  struct sigevent action = {0};
-  timer_t timer_id;
-
-  action.sigev_notify = SIGEV_THREAD;
-  action.sigev_notify_function = set_flag;
-  if (timer_create(CLOCK_MONOTONIC, &action, &timer_id) < 0)
-    exit(1);  // cannot create a monotonic timer
-  ])],
-  vim_cv_timer_create=yes,
-  vim_cv_timer_create=no,
-  AC_MSG_WARN([failed to build test program; if cross-compiling please set 'vim_cv_timer_create'])
+  AC_COMPILE_IFELSE([AC_LANG_PROGRAM([
+  #include <time.h>
+  ], [
+    timer_create(CLOCK_MONOTONIC, NULL, NULL);
+     ])],
+    vim_cv_timer_create=yes,
+    vim_cv_timer_create=no
   )])
 
 dnl If the previous failed, check for timer_create() and linking with -lrt.
@@ -3860,6 +3890,29 @@ if test "x$vim_cv_timer_create" = "xno" ; then
   save_LIBS="$LIBS"
   LIBS="$LIBS -lrt"
   AC_CACHE_CHECK([for timer_create with -lrt], [vim_cv_timer_create_with_lrt], [
+    AC_COMPILE_IFELSE([AC_LANG_PROGRAM([
+    #include <time.h>
+    ], [
+      timer_create(CLOCK_MONOTONIC, NULL, NULL);
+       ])],
+      vim_cv_timer_create_with_lrt=yes,
+      vim_cv_timer_create_with_lrt=no
+    )])
+  LIBS="$save_LIBS"
+else
+  vim_cv_timer_create_with_lrt=no
+fi
+
+dnl Run the program to find out if timer_create(CLOCK_MONOTONIC) actually
+dnl works, on Solaris timer_create() exists but fails at runtime.
+if test "x$vim_cv_timer_create" = "xyes" ||
+   test "x$vim_cv_timer_create_with_lrt" = "xyes"; then
+  save_LIBS="$LIBS"
+  if test "x$vim_cv_timer_create_with_lrt" = "xyes" ; then
+    LIBS="$LIBS -lrt"
+  fi
+
+  AC_CACHE_CHECK([if timer_create works], [vim_cv_timer_create_works], [
     AC_RUN_IFELSE([AC_LANG_PROGRAM([
     #if STDC_HEADERS
     # include <stdlib.h>
@@ -3876,23 +3929,19 @@ if test "x$vim_cv_timer_create" = "xno" ; then
       action.sigev_notify = SIGEV_THREAD;
       action.sigev_notify_function = set_flag;
       if (timer_create(CLOCK_MONOTONIC, &action, &timer_id) < 0)
-	exit(1);  // cannot create a monotonic timer
+        exit(1);  // cannot create a monotonic timer
       ])],
-      vim_cv_timer_create_with_lrt=yes,
-      vim_cv_timer_create_with_lrt=no,
-      AC_MSG_WARN([failed to build test program; if cross-compiling please set 'vim_cv_timer_create_with_lrt'])
+      vim_cv_timer_create_works=yes,
+      vim_cv_timer_create_works=no,
+      vim_cv_timer_create_works=yes
+      AC_MSG_WARN([cross-compiling: consider setting 'vim_cv_timer_create_works'])
     )])
-  LIBS="$save_LIBS"
-else
-  vim_cv_timer_create_with_lrt=no
-fi
 
-if test "x$vim_cv_timer_create" = "xyes" ; then
-  AC_DEFINE(HAVE_TIMER_CREATE)
-fi
-if test "x$vim_cv_timer_create_with_lrt" = "xyes" ; then
-  AC_DEFINE(HAVE_TIMER_CREATE)
-  LIBS="$LIBS -lrt"
+  if test "x$vim_cv_timer_create_works" = "xyes" ; then
+    AC_DEFINE(HAVE_TIMER_CREATE)
+  else
+    LIBS="$save_LIBS"
+  fi
 fi
 
 AC_CACHE_CHECK([whether stat() ignores a trailing slash], [vim_cv_stat_ignores_slash],
@@ -3911,7 +3960,8 @@ int main() {struct stat st;  exit(stat("configure/", &st) != 0); }
     ],[
       vim_cv_stat_ignores_slash=no
     ],[
-      AC_MSG_ERROR(cross-compiling: please set 'vim_cv_stat_ignores_slash')
+      vim_cv_stat_ignores_slash=yes
+      AC_MSG_WARN(cross-compiling: consider setting 'vim_cv_stat_ignores_slash')
     ])
   ])
 
@@ -4278,7 +4328,7 @@ int main() {
 }])],
 AC_MSG_RESULT(ok),
 AC_MSG_ERROR([WRONG!  uint32_t not defined correctly.]),
-AC_MSG_WARN([cannot check uint32_t when cross-compiling.]))
+AC_MSG_WARN([assuming uint32_t is correct when cross-compiling]))
 
 dnl Check for memmove() before bcopy(), makes memmove() be used when both are
 dnl present, fixes problem with incompatibility between Solaris 2.4 and 2.5.
@@ -4313,7 +4363,8 @@ AC_CACHE_CHECK([whether memmove handles overlaps],[vim_cv_memmove_handles_overla
       ],[
 	vim_cv_memmove_handles_overlap=no
       ],[
-	AC_MSG_ERROR(cross-compiling: please set 'vim_cv_memmove_handles_overlap')
+	vim_cv_memmove_handles_overlap=yes
+	AC_MSG_WARN(cross-compiling: consider setting 'vim_cv_memmove_handles_overlap')
       ])
   ])
 
@@ -4328,7 +4379,8 @@ else
       ],[
 	vim_cv_bcopy_handles_overlap=no
       ],[
-	AC_MSG_ERROR(cross-compiling: please set 'vim_cv_bcopy_handles_overlap')
+	vim_cv_bcopy_handles_overlap=yes
+	AC_MSG_WARN(cross-compiling: consider setting 'vim_cv_bcopy_handles_overlap')
       ])
     ])
 
@@ -4343,7 +4395,8 @@ else
 	  ],[
 	    vim_cv_memcpy_handles_overlap=no
 	  ],[
-	    AC_MSG_ERROR(cross-compiling: please set 'vim_cv_memcpy_handles_overlap')
+	    vim_cv_memcpy_handles_overlap=yes
+	    AC_MSG_WARN(cross-compiling: consider setting 'vim_cv_memcpy_handles_overlap')
 	  ])
       ])
 
@@ -4462,6 +4515,18 @@ if test "$enable_nls" = "yes"; then
       AC_SUBST(MAKEMO)
       dnl this was added in GNU gettext 0.10.36
       AC_CHECK_FUNCS(bind_textdomain_codeset)
+      AC_MSG_CHECKING([for dgettext])
+      AC_LINK_IFELSE([AC_LANG_PROGRAM(
+		[#include <libintl.h>],
+		[dgettext("Test", "Test");])],
+		AC_MSG_RESULT([yes]); AC_DEFINE(HAVE_DGETTEXT),
+      AC_MSG_CHECKING([for dngettext])
+		AC_MSG_RESULT([no]))
+      AC_LINK_IFELSE([AC_LANG_PROGRAM(
+		[#include <libintl.h>],
+		[dngettext("DOMAIN", "Test single", "Test plural", 1);])],
+		AC_MSG_RESULT([yes]); AC_DEFINE(HAVE_DNGETTEXT),
+		AC_MSG_RESULT([no]))
       dnl _nl_msg_cat_cntr is required for GNU gettext
       AC_MSG_CHECKING([for _nl_msg_cat_cntr])
       AC_LINK_IFELSE([AC_LANG_PROGRAM(
@@ -4485,6 +4550,15 @@ if test "$enable_nls" = "yes"; then
 	AC_MSG_RESULT([no])
       fi
       AC_SUBST(MSGFMT_DESKTOP)
+      AC_MSG_CHECKING([if $MSGFMT supports --no-convert])
+      if "$MSGFMT" --help | grep -q --  '--no-convert' >/dev/null; then
+        AC_MSG_RESULT([yes])
+        MSGFMTCMD="OLD_PO_FILE_INPUT=yes $MSGFMT --no-convert -v"
+      else
+        AC_MSG_RESULT([no])
+        MSGFMTCMD="OLD_PO_FILE_INPUT=yes $MSGFMT -v"
+      fi
+      AC_SUBST(MSGFMTCMD)
     fi
   else
     AC_MSG_RESULT([no "po/Makefile" - disabled]);

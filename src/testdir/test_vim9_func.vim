@@ -164,6 +164,47 @@ def Test_wrong_function_name()
   END
   v9.CheckScriptFailure(lines, 'E1182:')
   delfunc g:Define
+
+  lines =<< trim END
+    vim9script
+    var F1_ref: func
+    def Start()
+      F1_ref()
+    enddef
+    Start()
+  END
+  v9.CheckScriptFailure(lines, 'E117:')
+enddef
+
+" Check that in a legacy script a :def accesses the correct script variables.
+" Github issue: #14615.
+def Test_access_var_from_legacy_def()
+  # Access a script variable by name WITH "s:" prefix.
+  var lines =<< trim END
+    let s:foo = 'init'
+    let s:xxfoo = 'init'
+    def! AccessVarFromLegacyDef()
+        s:xxfoo = 'CHANGED'
+    enddef
+    call AccessVarFromLegacyDef()
+    call assert_equal('init', s:foo)
+    call assert_equal('CHANGED', s:xxfoo)
+  END
+  v9.CheckScriptSuccess(lines)
+
+  # Access a script variable by name WITHOUT "s:" prefix;
+  # previously this accessed "foo" and not "xxfoo"
+  lines =<< trim END
+    let s:foo = 'init'
+    let s:xxfoo = 'init'
+    def! AccessVarFromLegacyDef()
+        xxfoo = 'CHANGED'
+    enddef
+    call AccessVarFromLegacyDef()
+    call assert_equal('init', s:foo)
+    call assert_equal('CHANGED', s:xxfoo)
+  END
+  v9.CheckScriptSuccess(lines)
 enddef
 
 def Test_listing_function_error()
@@ -503,6 +544,47 @@ def Test_not_missing_return()
           return 0
         endif
         throw 'Error'
+      enddef
+      defcompile
+  END
+  v9.CheckScriptSuccess(lines)
+enddef
+
+" Test for an if-else block ending in a throw statement
+def Test_if_else_with_throw()
+  var lines =<< trim END
+      def Ifelse_Throw1(): number
+        if false
+          return 1
+        else
+          throw 'Error'
+        endif
+      enddef
+      defcompile
+  END
+  v9.CheckScriptSuccess(lines)
+
+  lines =<< trim END
+      def Ifelse_Throw2(): number
+        if true
+          throw 'Error'
+        else
+          return 2
+        endif
+      enddef
+      defcompile
+  END
+  v9.CheckScriptSuccess(lines)
+
+  lines =<< trim END
+      def Ifelse_Throw3(): number
+        if true
+          return 1
+        elseif false
+          throw 'Error'
+        else
+          return 3
+        endif
       enddef
       defcompile
   END
@@ -860,6 +942,13 @@ def Test_func_with_comments()
       enddef
   END
   v9.CheckScriptFailure(lines, 'E125:', 1)
+
+  lines =<< trim END
+      def Func(f=
+      )
+      enddef
+  END
+  v9.CheckScriptFailure(lines, 'E125:', 2)
 
   lines =<< trim END
       def Func(
@@ -1313,7 +1402,7 @@ def Test_call_wrong_args()
     enddef
     Func([])
   END
-  v9.CheckScriptFailure(lines, 'E1013: Argument 1: type mismatch, expected string but got list<unknown>', 5)
+  v9.CheckScriptFailure(lines, 'E1013: Argument 1: type mismatch, expected string but got list<any>', 5)
 
   # argument name declared earlier is found when declaring a function
   lines =<< trim END
@@ -1995,7 +2084,7 @@ def Test_varargs_mismatch()
       var res = Map((v) => str2nr(v))
       assert_equal(12, res)
   END
-  v9.CheckScriptSuccess(lines)
+  v9.CheckScriptFailure(lines, 'E1180: Variable arguments type must be a list: any')
 enddef
 
 def Test_using_var_as_arg()
@@ -2764,7 +2853,7 @@ def Test_func_type_fails()
   v9.CheckDefFailure(['var Ref1: func()', 'Ref1 = g:FuncOneArgRetNumber'], 'E1012: Type mismatch; expected func() but got func(number): number')
   v9.CheckDefFailure(['var Ref1: func(bool)', 'Ref1 = g:FuncTwoArgNoRet'], 'E1012: Type mismatch; expected func(bool) but got func(bool, number)')
   v9.CheckDefFailure(['var Ref1: func(?bool)', 'Ref1 = g:FuncTwoArgNoRet'], 'E1012: Type mismatch; expected func(?bool) but got func(bool, number)')
-  v9.CheckDefFailure(['var Ref1: func(...bool)', 'Ref1 = g:FuncTwoArgNoRet'], 'E1012: Type mismatch; expected func(...bool) but got func(bool, number)')
+  v9.CheckDefFailure(['var Ref1: func(...bool)', 'Ref1 = g:FuncTwoArgNoRet'], 'E1180: Variable arguments type must be a list: bool')
 
   v9.CheckDefFailure(['var RefWrong: func(string ,number)'], 'E1068:')
   v9.CheckDefFailure(['var RefWrong: func(string,number)'], 'E1069:')
@@ -3663,6 +3752,17 @@ def Test_partial_call()
       const Call = Foo(Expr)
   END
   v9.CheckScriptFailure(lines, 'E1031:')
+
+  # Test for calling a partial that takes a single argument.
+  # This used to produce a "E340: Internal error" message.
+  lines =<< trim END
+      def Foo(n: number): number
+        return n * 2
+      enddef
+      var Fn = function(Foo, [10])
+      assert_equal(20, Fn())
+  END
+  v9.CheckDefAndScriptSuccess(lines)
 enddef
 
 def Test_partial_double_nested()
@@ -4582,6 +4682,80 @@ def Run_Test_keytyped_in_nested_function()
   # clean up
   term_sendkeys(buf, "\<Esc>")
   g:StopVimInTerminal(buf)
+enddef
+
+" Test for test_override('defcompile')
+def Test_test_override_defcompile()
+  var lines =<< trim END
+    vim9script
+    def Foo()
+      xxx
+    enddef
+  END
+  test_override('defcompile', 1)
+  v9.CheckScriptFailure(lines, 'E476: Invalid command: xxx')
+  test_override('defcompile', 0)
+enddef
+
+" Test for using a comment after the opening curly brace of an inner block.
+def Test_comment_after_inner_block()
+  var lines =<< trim END
+    vim9script
+
+    def F(G: func)
+    enddef
+
+    F(() => {       # comment1
+      F(() => {     # comment2
+        echo 'ok'   # comment3
+      })            # comment4
+    })              # comment5
+  END
+  v9.CheckScriptSuccess(lines)
+enddef
+
+" Test for calling an imported funcref which is modified in the current script
+def Test_call_modified_import_func()
+  var lines =<< trim END
+    vim9script
+
+    export var done = 0
+
+    def Noop()
+    enddef
+
+    export var Setup = Noop
+
+    export def Run()
+      done = 0
+      Setup()
+      call(Setup, [])
+      call("Setup", [])
+      call(() => Setup(), [])
+      done += 1
+    enddef
+  END
+  writefile(lines, 'XcallModifiedImportFunc.vim', 'D')
+
+  lines =<< trim END
+    vim9script
+
+    import './XcallModifiedImportFunc.vim' as imp
+
+    var setup = 0
+
+    imp.Run()
+
+    imp.Setup = () => {
+      ++setup
+    }
+
+    imp.Run()
+
+    assert_equal(4, setup)
+    assert_equal(1, imp.done)
+  END
+  v9.CheckScriptSuccess(lines)
 enddef
 
 " The following messes up syntax highlight, keep near the end.

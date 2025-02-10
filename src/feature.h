@@ -22,7 +22,7 @@
  * - Add a #define below.
  * - Add a message in the table above ex_version().
  * - Add a string to f_has().
- * - Add a feature to ":help feature-list" in doc/eval.txt.
+ * - Add a feature to ":help feature-list" in doc/builtin.txt.
  * - Add feature to ":help +feature-list" in doc/various.txt.
  * - Add comment for the documentation of commands that use the feature.
  */
@@ -136,11 +136,6 @@
  * +footer		Motif only: Add a message area at the bottom of the
  *			main window area.
  */
-
-/*
- * Message history is fixed at 200 messages.
- */
-#define MAX_MSG_HIST_LEN 200
 
 /*
  * +folding		Fold lines.
@@ -1174,4 +1169,12 @@
 	|| defined(DYNAMIC_LUA) \
 	|| defined(FEAT_TERMINAL)
 # define USING_LOAD_LIBRARY
+#endif
+
+/*
+ * currently Unix only: XATTR support
+ */
+
+#if defined(FEAT_NORMAL) && defined(HAVE_XATTR) && !defined(MACOS_X)
+# define FEAT_XATTR
 #endif
